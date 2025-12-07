@@ -7,7 +7,7 @@
 const int SCREEN_WIDTH = 800;
 const int SCREEN_HEIGHT = 600;
 
-void renderText(SDL_Renderer* renderer, TTF_Font* font, const std::string& text, int x, int y, SDL_Color color, bool centered = false) {
+void renderText(SDL_Renderer* renderer, TTF_Font* font, const std::string& text, int x, int y, SDL_Color color, int screenWidth, bool centered = false) {
     SDL_Surface* surface = TTF_RenderText_Solid(font, text.c_str(), color);
     if (surface == nullptr) {
         std::cerr << "Unable to render text surface! SDL_ttf Error: " << TTF_GetError() << std::endl;
@@ -19,7 +19,7 @@ void renderText(SDL_Renderer* renderer, TTF_Font* font, const std::string& text,
         std::cerr << "Unable to create texture from rendered text! SDL Error: " << SDL_GetError() << std::endl;
     } else {
         int textWidth = surface->w;
-        int finalX = centered ? (SCREEN_WIDTH - textWidth) / 2 : x;
+        int finalX = centered ? (screenWidth - textWidth) / 2 : x;
         SDL_Rect renderQuad = { finalX, y, surface->w, surface->h };
         SDL_RenderCopy(renderer, texture, nullptr, &renderQuad);
         SDL_DestroyTexture(texture);
@@ -65,7 +65,11 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    TTF_Font* font = TTF_OpenFont("fonts/MetalMania-Regular.ttf", 84);
+    int screenWidth, screenHeight;
+    SDL_GetRendererOutputSize(renderer, &screenWidth, &screenHeight);
+
+    // TTF_Font* font = TTF_OpenFont("fonts/MetalMania-Regular.ttf", 84);
+    TTF_Font* font = TTF_OpenFont("fonts/Doom2016Left-RpJDA.ttf", 96);
     if (font == nullptr) {
         std::cerr << "Failed to load font! SDL_ttf Error: " << TTF_GetError() << std::endl;
         SDL_DestroyRenderer(renderer);
@@ -75,7 +79,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::vector<std::string> menuItems = { "New Game", "Load Game", "Options", "Quit" };
+    std::vector<std::string> menuItems = { "DooM", "DooM 2", "DooM TnT", "New Game", "Load Game", "Options", "Quit" };
     int selectedItem = 0;
 
     bool quit = false;
@@ -113,11 +117,14 @@ int main(int argc, char* argv[]) {
         SDL_Color white = { 255, 255, 255, 255 };
         SDL_Color red = { 255, 0, 0, 255 };
 
-        int y = 200;
+        int fontHeight = TTF_FontHeight(font);
+        int totalMenuHeight = menuItems.size() * fontHeight;
+        int startY = (screenHeight - totalMenuHeight) / 2;
+
         for (int i = 0; i < menuItems.size(); ++i) {
             SDL_Color color = (i == selectedItem) ? red : white;
-            renderText(renderer, font, menuItems[i], 0, y, color, true);
-            y += 50;
+            int y = startY + i * fontHeight;
+            renderText(renderer, font, menuItems[i], 0, y, color, screenWidth, true);
         }
 
         SDL_RenderPresent(renderer);

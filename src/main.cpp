@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>
 #include "fire.h"
+#include "font_data.h"
 
 const int SCREEN_WIDTH = 800;
 const int SCREEN_HEIGHT = 600;
@@ -71,7 +72,9 @@ int main(int argc, char* argv[]) {
 
     Fire fire(renderer, screenWidth, screenHeight);
 
-    TTF_Font* font = TTF_OpenFont("fonts/MetalMania-Regular.ttf", 84);
+    // TTF_Font* font = TTF_OpenFont("fonts/MetalMania-Regular.ttf", 84);
+    SDL_RWops* rw = SDL_RWFromConstMem(fonts_Doom2016Left_RpJDA_ttf, fonts_Doom2016Left_RpJDA_ttf_len);
+    TTF_Font* font = TTF_OpenFontRW(rw, 1, 84);
     if (font == nullptr) {
         std::cerr << "Failed to load font! SDL_ttf Error: " << TTF_GetError() << std::endl;
         SDL_DestroyRenderer(renderer);

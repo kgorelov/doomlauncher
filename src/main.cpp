@@ -5,30 +5,10 @@
 #include <string>
 #include "fire.h"
 #include "font_data.h"
+#include "menu.h"
 
 const int SCREEN_WIDTH = 800;
 const int SCREEN_HEIGHT = 600;
-
-void renderText(SDL_Renderer* renderer, TTF_Font* font, const std::string& text, int x, int y, SDL_Color color, int screenWidth, bool centered = false) {
-    SDL_Surface* surface = TTF_RenderText_Solid(font, text.c_str(), color);
-    if (surface == nullptr) {
-        std::cerr << "Unable to render text surface! SDL_ttf Error: " << TTF_GetError() << std::endl;
-        return;
-    }
-
-    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
-    if (texture == nullptr) {
-        std::cerr << "Unable to create texture from rendered text! SDL Error: " << SDL_GetError() << std::endl;
-    } else {
-        int textWidth = surface->w;
-        int finalX = centered ? (screenWidth - textWidth) / 2 : x;
-        SDL_Rect renderQuad = { finalX, y, surface->w, surface->h };
-        SDL_RenderCopy(renderer, texture, nullptr, &renderQuad);
-        SDL_DestroyTexture(texture);
-    }
-
-    SDL_FreeSurface(surface);
-}
 
 int main(int argc, char* argv[]) {
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
@@ -72,7 +52,6 @@ int main(int argc, char* argv[]) {
 
     Fire fire(renderer, screenWidth, screenHeight);
 
-    // TTF_Font* font = TTF_OpenFont("fonts/MetalMania-Regular.ttf", 84);
     SDL_RWops* rw = SDL_RWFromConstMem(fonts_Doom2016Left_RpJDA_ttf, fonts_Doom2016Left_RpJDA_ttf_len);
     TTF_Font* font = TTF_OpenFontRW(rw, 1, 84);
     if (font == nullptr) {
@@ -84,8 +63,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::vector<std::string> menuItems = { "New Game", "Load Game", "Options", "Quit" };
-    int selectedItem = 0;
+    Menu menu(renderer, font, screenWidth, screenHeight);
 
     bool quit = false;
     SDL_Event event;
@@ -96,25 +74,18 @@ int main(int argc, char* argv[]) {
                 quit = true;
             }
             if (event.type == SDL_KEYDOWN) {
-                switch (event.key.keysym.sym) {
-                    case SDLK_UP:
-                        selectedItem = (selectedItem - 1 + menuItems.size()) % menuItems.size();
-                        break;
-                    case SDLK_DOWN:
-                        selectedItem = (selectedItem + 1) % menuItems.size();
-                        break;
-                    case SDLK_RETURN:
-                        // Handle selection
-                        if (menuItems[selectedItem] == "Quit") {
-                            quit = true;
-                        }
-                        break;
-                    case SDLK_ESCAPE:
-                        quit = true;
-                        break;
+                if (event.key.keysym.sym == SDLK_ESCAPE) {
+                    quit = true;
                 }
             }
+            menu.handleEvent(event);
         }
+
+        if (menu.isQuitSelected()) {
+            quit = true;
+        }
+
+        menu.update();
 
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);
@@ -122,18 +93,7 @@ int main(int argc, char* argv[]) {
         fire.update();
         fire.render();
 
-        SDL_Color white = { 255, 255, 255, 255 };
-        SDL_Color red = { 255, 0, 0, 255 };
-
-        int fontHeight = TTF_FontHeight(font);
-        int totalMenuHeight = menuItems.size() * fontHeight;
-        int startY = (screenHeight - totalMenuHeight) / 2;
-
-        for (int i = 0; i < menuItems.size(); ++i) {
-            SDL_Color color = (i == selectedItem) ? red : white;
-            int y = startY + i * fontHeight;
-            renderText(renderer, font, menuItems[i], 0, y, color, screenWidth, true);
-        }
+        menu.render();
 
         SDL_RenderPresent(renderer);
     }

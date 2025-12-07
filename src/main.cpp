@@ -7,7 +7,7 @@
 const int SCREEN_WIDTH = 800;
 const int SCREEN_HEIGHT = 600;
 
-void renderText(SDL_Renderer* renderer, TTF_Font* font, const std::string& text, int x, int y, SDL_Color color) {
+void renderText(SDL_Renderer* renderer, TTF_Font* font, const std::string& text, int x, int y, SDL_Color color, bool centered = false) {
     SDL_Surface* surface = TTF_RenderText_Solid(font, text.c_str(), color);
     if (surface == nullptr) {
         std::cerr << "Unable to render text surface! SDL_ttf Error: " << TTF_GetError() << std::endl;
@@ -18,7 +18,9 @@ void renderText(SDL_Renderer* renderer, TTF_Font* font, const std::string& text,
     if (texture == nullptr) {
         std::cerr << "Unable to create texture from rendered text! SDL Error: " << SDL_GetError() << std::endl;
     } else {
-        SDL_Rect renderQuad = { x, y, surface->w, surface->h };
+        int textWidth = surface->w;
+        int finalX = centered ? (SCREEN_WIDTH - textWidth) / 2 : x;
+        SDL_Rect renderQuad = { finalX, y, surface->w, surface->h };
         SDL_RenderCopy(renderer, texture, nullptr, &renderQuad);
         SDL_DestroyTexture(texture);
     }
@@ -63,7 +65,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    TTF_Font* font = TTF_OpenFont("fonts/MetalMania-Regular.ttf", 28);
+    TTF_Font* font = TTF_OpenFont("fonts/MetalMania-Regular.ttf", 84);
     if (font == nullptr) {
         std::cerr << "Failed to load font! SDL_ttf Error: " << TTF_GetError() << std::endl;
         SDL_DestroyRenderer(renderer);
@@ -114,7 +116,7 @@ int main(int argc, char* argv[]) {
         int y = 200;
         for (int i = 0; i < menuItems.size(); ++i) {
             SDL_Color color = (i == selectedItem) ? red : white;
-            renderText(renderer, font, menuItems[i], 300, y, color);
+            renderText(renderer, font, menuItems[i], 0, y, color, true);
             y += 50;
         }
 

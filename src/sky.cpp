@@ -15,7 +15,7 @@ Sky::Sky(SDL_Renderer* renderer, int screenWidth, int screenHeight)
     std::vector<Uint32> pixels(width * height);
 
     for (int y = 0; y < height; ++y) {
-        for (int x = 0; x < width; ++x) {
+        for (int x = 0; x < width / 2; ++x) {
             double frequency = 0.01;
             double amplitude = 1.0;
             double noiseValue = 0.0;
@@ -33,6 +33,7 @@ Sky::Sky(SDL_Renderer* renderer, int screenWidth, int screenHeight)
             gray *= gradient * gradient;
 
             pixels[y * width + x] = (0xFF << 24) | (gray << 16) | (gray << 8) | gray;
+            pixels[y * width + (width - 1 - x)] = (0xFF << 24) | (gray << 16) | (gray << 8) | gray;
         }
     }
 

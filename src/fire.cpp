@@ -32,28 +32,25 @@ void Fire::initPalette() {
 }
 
 void Fire::update() {
-    // Set the bottom row to full heat
+    // Set the bottom row to full heat with some randomness
     for (int x = 0; x < width; ++x) {
-        fireBuffer[(height - 1) * width + x] = 255;
+        fireBuffer[(height - 1) * width + x] = rand() % 128 + 128;
     }
 
     // Propagate fire upwards
     for (int y = 0; y < height - 1; ++y) {
         for (int x = 0; x < width; ++x) {
-            int srcY = y + 1;
-            int srcX = x;
-
-            int p1 = fireBuffer[srcY * width + (srcX - 1 + width) % width];
-            int p2 = fireBuffer[srcY * width + srcX];
-            int p3 = fireBuffer[srcY * width + (srcX + 1) % width];
-            int p4 = fireBuffer[(srcY + 1) % height * width + srcX];
+            int p1 = fireBuffer[(y + 1) * width + (x - 1 + width) % width];
+            int p2 = fireBuffer[(y + 1) * width + x];
+            int p3 = fireBuffer[(y + 1) * width + (x + 1) % width];
+            int p4 = fireBuffer[((y + 2) % height) * width + x];
 
             int newValue = (p1 + p2 + p3 + p4) / 4;
-            if (newValue > 0) {
-                newValue -= rand() % 2; // Cooling
+            if (newValue > 1) {
+                newValue -= 1; // Cooling
             }
 
-            fireBuffer[y * width + x] = (Uint8)std::max(0, newValue);
+            fireBuffer[y * width + x] = (Uint8)std::max(0, newValue - (rand() & 1));
         }
     }
 }

@@ -53,7 +53,7 @@ int main(int argc, char* argv[]) {
     Fire fire(renderer, screenWidth, screenHeight);
 
     SDL_RWops* rw = SDL_RWFromConstMem(fonts_Doom2016Left_RpJDA_ttf, fonts_Doom2016Left_RpJDA_ttf_len);
-    TTF_Font* font = TTF_OpenFontRW(rw, 1, 84);
+    TTF_Font* font = TTF_OpenFontRW(rw, 1, 96);
     if (font == nullptr) {
         std::cerr << "Failed to load font! SDL_ttf Error: " << TTF_GetError() << std::endl;
         SDL_DestroyRenderer(renderer);

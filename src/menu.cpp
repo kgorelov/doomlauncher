@@ -3,7 +3,7 @@
 
 Menu::Menu(SDL_Renderer* renderer, TTF_Font* font, int screenWidth, int screenHeight)
     : renderer(renderer), font(font), screenWidth(screenWidth), screenHeight(screenHeight), selectedItem(0), quitSelected(false) {
-    menuItems = { "New Game", "Load Game", "Options", "Quit" };
+    menuItems = { "DooM", "DooM 2", "DooM TNT", "Plutonia", "Plutonia 2", "Sigil", "Options", "Quit" };
 }
 
 Menu::~Menu() {

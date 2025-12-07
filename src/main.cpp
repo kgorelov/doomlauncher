@@ -3,6 +3,7 @@
 #include <iostream>
 #include <vector>
 #include <string>
+#include "fire.h"
 
 const int SCREEN_WIDTH = 800;
 const int SCREEN_HEIGHT = 600;
@@ -68,8 +69,9 @@ int main(int argc, char* argv[]) {
     int screenWidth, screenHeight;
     SDL_GetRendererOutputSize(renderer, &screenWidth, &screenHeight);
 
-    // TTF_Font* font = TTF_OpenFont("fonts/MetalMania-Regular.ttf", 84);
-    TTF_Font* font = TTF_OpenFont("fonts/Doom2016Left-RpJDA.ttf", 96);
+    Fire fire(renderer, screenWidth, screenHeight);
+
+    TTF_Font* font = TTF_OpenFont("fonts/MetalMania-Regular.ttf", 84);
     if (font == nullptr) {
         std::cerr << "Failed to load font! SDL_ttf Error: " << TTF_GetError() << std::endl;
         SDL_DestroyRenderer(renderer);
@@ -79,7 +81,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::vector<std::string> menuItems = { "DooM", "DooM 2", "DooM TnT", "New Game", "Load Game", "Options", "Quit" };
+    std::vector<std::string> menuItems = { "New Game", "Load Game", "Options", "Quit" };
     int selectedItem = 0;
 
     bool quit = false;
@@ -113,6 +115,9 @@ int main(int argc, char* argv[]) {
 
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);
+
+        fire.update();
+        fire.render();
 
         SDL_Color white = { 255, 255, 255, 255 };
         SDL_Color red = { 255, 0, 0, 255 };

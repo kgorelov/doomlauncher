@@ -6,7 +6,7 @@ find_package(SDL2 REQUIRED)
 find_package(SDL2_ttf REQUIRED)
 
 # Add source files
-add_executable(doomlauncher src/main.cpp)
+add_executable(doomlauncher src/main.cpp src/fire.cpp)
 
 target_include_directories(doomlauncher PUBLIC ${SDL2_INCLUDE_DIRS} ${SDL2_TTF_INCLUDE_DIRS})
 find_library(SDL2_LIBRARY NAMES SDL2)

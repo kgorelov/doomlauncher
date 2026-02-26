@@ -59,8 +59,7 @@ void Fire::flameActive() {
         int v1 = fireBuffer[(fheight - 1) * fwidth + x];
         v1 += (rand() % variance) - vartrend;
         if (v1 < 0) v1 = 0;
-        if (v1 > 255) v1 = 255;
-        fireBuffer[(fheight - 1) * fwidth + x] = v1;
+        fireBuffer[(fheight - 1) * fwidth + x] = v1 % 256;
     }
 
     if (bloom) {
@@ -114,6 +113,10 @@ void Fire::flameAdvance() {
                 }
             }
         }
+    }
+
+    for (int x = 0; x < fwidth; ++x) {
+        fireBuffer[x] = (fireBuffer[x] * residual) >> 8;
     }
 }
 

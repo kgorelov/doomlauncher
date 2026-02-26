@@ -20,7 +20,21 @@ private:
     SDL_Texture* fireTexture;
     std::vector<SDL_Color> palette;
 
+    int hspread;
+    int vspread;
+    int residual;
+    int variance;
+    int vartrend;
+    bool bloom;
+
+    int ihspread;
+    int ivspread;
+    int iresidual;
+
+
     void initPalette();
+    void flameActive();
+    void flameAdvance();
 };
 
 #endif // FIRE_H

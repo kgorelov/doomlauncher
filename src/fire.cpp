@@ -1,4 +1,5 @@
 #include "fire.h"
+#include <algorithm>
 #include <cstdlib>
 #include <ctime>
 
@@ -8,6 +9,21 @@ Fire::Fire(SDL_Renderer* renderer, int screenWidth, int screenHeight)
     fireTexture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, width, height);
     initPalette();
     srand(time(nullptr));
+
+    hspread = 30;
+    vspread = 97;
+    residual = 99;
+    variance = 50;
+    vartrend = 20;
+    bloom = true;
+
+    ihspread = hspread;
+    ivspread = vspread;
+    iresidual = residual;
+
+    for (int x = 0; x < width; ++x) {
+        fireBuffer[(height - 1) * width + x] = 255;
+    }
 }
 
 Fire::~Fire() {
@@ -32,28 +48,73 @@ void Fire::initPalette() {
 }
 
 void Fire::update() {
-    // Set the bottom row to full heat with some randomness
+    flameActive();
+    flameAdvance();
+}
+
+void Fire::flameActive() {
     for (int x = 0; x < width; ++x) {
-        fireBuffer[(height - 1) * width + x] = rand() % 128 + 128;
+        int v1 = fireBuffer[(height - 1) * width + x];
+        v1 += (rand() % variance) - vartrend;
+        if (v1 < 0) v1 = 0;
+        if (v1 > 255) v1 = 255;
+        fireBuffer[(height - 1) * width + x] = v1;
     }
 
-    // Propagate fire upwards
-    for (int y = 0; y < height - 1; ++y) {
+    if (bloom) {
+        int v1 = (rand() % 100);
+        if (v1 == 10)
+            residual += (rand() % 10);
+        else if (v1 == 20)
+            hspread += (rand() % 15);
+        else if (v1 == 30)
+            vspread += (rand() % 20);
+    }
+
+    residual = ((iresidual * 10) + (residual * 90)) / 100;
+    hspread = ((ihspread * 10) + (hspread * 90)) / 100;
+    vspread = ((ivspread * 10) + (vspread * 90)) / 100;
+}
+
+void Fire::flameAdvance() {
+    for (int y = height - 1; y > 0; --y) {
         for (int x = 0; x < width; ++x) {
-            int p1 = fireBuffer[(y + 1) * width + (x - 1 + width) % width];
-            int p2 = fireBuffer[(y + 1) * width + x];
-            int p3 = fireBuffer[(y + 1) * width + (x + 1) % width];
-            int p4 = fireBuffer[((y + 2) % height) * width + x];
+            int v1 = fireBuffer[y * width + x];
+            if (v1 > 0) {
+                int v3, v2;
+                Uint8* p_above = &fireBuffer[(y - 1) * width + x];
 
-            int newValue = (p1 + p2 + p3 + p4) / 4;
-            if (newValue > 1) {
-                newValue -= 1; // Cooling
+                // Vertical spread
+                v3 = (v1 * vspread) >> 8;
+                v2 = *p_above;
+                v2 += v3;
+                if (v2 > 255) v2 = 255;
+                *p_above = v2;
+
+                // Horizontal spread
+                v3 = (v1 * hspread) >> 8;
+                if (x > 0) {
+                    v2 = *(p_above - 1);
+                    v2 += v3;
+                    if (v2 > 255) v2 = 255;
+                    *(p_above - 1) = v2;
+                }
+                if (x < width - 1) {
+                    v2 = *(p_above + 1);
+                    v2 += v3;
+                    if (v2 > 255) v2 = 255;
+                    *(p_above + 1) = v2;
+                }
+
+                // Cool down current cell
+                if (y < height - 1) {
+                    fireBuffer[y * width + x] = (v1 * residual) >> 8;
+                }
             }
-
-            fireBuffer[y * width + x] = (Uint8)std::max(0, newValue - (rand() & 1));
         }
     }
 }
+
 
 void Fire::render() {
     void* pixels;

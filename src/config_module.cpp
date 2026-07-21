@@ -296,7 +296,22 @@ std::vector<ResolvedMenuItem> ModuleRegistry::resolve_menu_items() {
             merged_scope[dep_mod->name + ".MODULEDIR"] = Value(dep_mod->module_dir);
 
             for (const auto& [k, v] : dep_mod->vars) {
-                merged_scope[k] = v;
+                if (v.type == Value::Type::String) {
+                    std::string expanded = TemplateEngine::render(v.str_val, merged_scope);
+                    merged_scope[k] = Value(expanded);
+                } else if (v.type == Value::Type::Array) {
+                    Array expanded_arr;
+                    for (const auto& elem : v.arr_val) {
+                        if (elem.type == Value::Type::String) {
+                            expanded_arr.push_back(Value(TemplateEngine::render(elem.str_val, merged_scope)));
+                        } else {
+                            expanded_arr.push_back(elem);
+                        }
+                    }
+                    merged_scope[k] = Value(expanded_arr);
+                } else {
+                    merged_scope[k] = v;
+                }
             }
 
             for (const auto& [k, t] : dep_mod->templates) {
@@ -311,17 +326,22 @@ std::vector<ResolvedMenuItem> ModuleRegistry::resolve_menu_items() {
         ResolvedMenuItem item;
         item.module_name = mod.name;
         item.title = mod.title;
-        item.vars = merged_scope;
 
-        // Render all templates
+        // Render all templates (with multi-pass stability)
         for (const auto& [tmpl_name, tmpl_str] : merged_templates) {
-            std::string rendered = TemplateEngine::render(tmpl_str, merged_scope);
-            merged_scope[tmpl_name] = Value(rendered);
+            std::string current = tmpl_str;
+            for (int pass = 0; pass < 5; ++pass) {
+                std::string next = TemplateEngine::render(current, merged_scope);
+                if (next == current) break;
+                current = next;
+            }
+            merged_scope[tmpl_name] = Value(current);
             if (tmpl_name == "CMD") {
-                item.cmd = rendered;
+                item.cmd = current;
             }
         }
 
+        item.vars = merged_scope;
         items.push_back(item);
     }
 

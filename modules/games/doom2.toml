@@ -1,0 +1,9 @@
+name = "doom2"
+title = "Doom II: Hell on Earth"
+is_menu_item = true
+requires = ["boom"]
+
+[vars]
+IWAD_PATH = "$MODULEDIR/DOOM2.WAD"
+COMPAT_LEVEL = 2
+SAVEDIR = "$MODULEDIR/.saves"

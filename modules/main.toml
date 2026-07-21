@@ -1,0 +1,6 @@
+name = "main"
+
+includes = [
+    "engines/*.toml",
+    "games/*.toml"
+]

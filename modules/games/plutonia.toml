@@ -1,0 +1,7 @@
+name = "plutonia"
+title = "Final Doom: The Plutonia Experiment"
+is_menu_item = true
+requires = ["doom2"]
+
+[vars]
+PWADS = ["$MODULEDIR/PLUTONIA.WAD"]

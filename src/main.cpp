@@ -1,12 +1,16 @@
 #include <SDL.h>
 #include <SDL_ttf.h>
+#include <filesystem>
 #include <iostream>
-#include <vector>
 #include <string>
+#include <vector>
+#include "config_module.h"
 #include "fire.h"
 #include "font_data.h"
 #include "menu.h"
 #include "sky.h"
+
+namespace fs = std::filesystem;
 
 const int SCREEN_WIDTH = 800;
 const int SCREEN_HEIGHT = 600;
@@ -54,9 +58,13 @@ int main(int argc, char* argv[]) {
     Fire fire(renderer, screenWidth, screenHeight);
     Sky sky(renderer, screenWidth, screenHeight);
 
-    SDL_RWops* rw = SDL_RWFromConstMem(fonts_Doom2016Left_RpJDA_ttf, fonts_Doom2016Left_RpJDA_ttf_len);
-    TTF_Font* font = TTF_OpenFontRW(rw, 1, 84);
-    if (font == nullptr) {
+    SDL_RWops* rw1 = SDL_RWFromConstMem(fonts_Doom2016Left_RpJDA_ttf, fonts_Doom2016Left_RpJDA_ttf_len);
+    TTF_Font* font = TTF_OpenFontRW(rw1, 1, 84);
+
+    SDL_RWops* rw2 = SDL_RWFromConstMem(fonts_Doom2016Left_RpJDA_ttf, fonts_Doom2016Left_RpJDA_ttf_len);
+    TTF_Font* smallFont = TTF_OpenFontRW(rw2, 1, 24);
+
+    if (font == nullptr || smallFont == nullptr) {
         std::cerr << "Failed to load font! SDL_ttf Error: " << TTF_GetError() << std::endl;
         SDL_DestroyRenderer(renderer);
         SDL_DestroyWindow(window);
@@ -65,7 +73,28 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    Menu menu(renderer, font, screenWidth, screenHeight);
+    // Load config modules
+    doomlauncher::ModuleRegistry registry;
+    std::string configPath = "modules/main.toml";
+    if (argc > 1) {
+        configPath = argv[1];
+    }
+
+    if (fs::exists(configPath)) {
+        std::cout << "Loading config file: " << configPath << std::endl;
+        registry.load_file(configPath);
+    } else if (fs::exists("modules")) {
+        std::cout << "Loading modules directory..." << std::endl;
+        registry.load_directory("modules");
+    } else {
+        std::cerr << "Warning: No config modules found!" << std::endl;
+    }
+
+    std::vector<doomlauncher::ResolvedMenuItem> resolvedItems = registry.resolve_menu_items();
+    std::cout << "Resolved " << resolvedItems.size() << " menu item(s) from config." << std::endl;
+
+    Menu menu(renderer, font, smallFont, screenWidth, screenHeight);
+    menu.setMenuItems(resolvedItems);
 
     bool quit = false;
     SDL_Event event;
@@ -103,7 +132,9 @@ int main(int argc, char* argv[]) {
         SDL_RenderPresent(renderer);
     }
 
-    TTF_CloseFont(font);
+    if (font) TTF_CloseFont(font);
+    if (smallFont) TTF_CloseFont(smallFont);
+
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     TTF_Quit();

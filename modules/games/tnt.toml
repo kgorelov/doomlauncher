@@ -1,0 +1,7 @@
+name = "tnt"
+title = "Final Doom: TNT Evilution"
+is_menu_item = true
+requires = ["doom2"]
+
+[vars]
+PWADS = ["$MODULEDIR/TNT.WAD"]

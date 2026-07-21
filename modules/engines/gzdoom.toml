@@ -1,0 +1,9 @@
+name = "gzdoom"
+title = "GZDoom Engine Base"
+is_menu_item = false
+
+[vars]
+GZDOOM_BIN = "gzdoom"
+
+[templates]
+CMD = "{{GZDOOM_BIN}} -iwad {{IWAD_PATH}}{% if PWADS %}{% for wad in PWADS %} -file {{wad}}{% endfor %}{% endif %} {% if SAVEDIR %}-savedir {{SAVEDIR}}{% endif %}"

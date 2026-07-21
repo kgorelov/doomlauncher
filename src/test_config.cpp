@@ -107,12 +107,32 @@ PWADS = ["PLUTONIA.WAD"]
     std::remove("test_doom2.toml");
     std::remove("test_plutonia.toml");
 
-    std::cout << "ModuleRegistry tests passed!" << std::endl;
+    std::cout << "ModuleRegistry tests passed!" << std::endl << std::endl;
+}
+
+void test_real_modules() {
+    std::cout << "--- Testing modules/main.toml ---" << std::endl;
+    ModuleRegistry registry;
+    bool loaded = registry.load_file("modules/main.toml");
+    if (!loaded) {
+        loaded = registry.load_file("../modules/main.toml");
+    }
+    assert(loaded);
+
+    std::vector<ResolvedMenuItem> menu_items = registry.resolve_menu_items();
+    std::cout << "Loaded real modules count: " << menu_items.size() << std::endl;
+    for (const auto& item : menu_items) {
+        std::cout << "Menu Item: '" << item.title << "' (" << item.module_name << ")" << std::endl;
+        std::cout << "  CMD: " << item.cmd << std::endl;
+    }
+    assert(menu_items.size() > 0);
+    std::cout << "Real modules test passed!" << std::endl << std::endl;
 }
 
 int main() {
     test_template_engine();
     test_module_registry();
+    test_real_modules();
     std::cout << "ALL TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;
 }

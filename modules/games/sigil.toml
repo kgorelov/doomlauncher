@@ -1,0 +1,7 @@
+name = "sigil"
+title = "Sigil"
+is_menu_item = true
+requires = ["doom"]
+
+[vars]
+PWADS = ["$MODULEDIR/SIGIL.WAD"]

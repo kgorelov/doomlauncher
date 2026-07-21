@@ -1,0 +1,9 @@
+name = "boom"
+title = "Boom Engine Base"
+is_menu_item = false
+
+[vars]
+BOOM_BIN = "boom"
+
+[templates]
+CMD = "{{BOOM_BIN}} -iwad {{IWAD_PATH}} {% if COMPAT_LEVEL %}-complevel {{COMPAT_LEVEL}}{% endif %}{% if PWADS %}{% for wad in PWADS %} -file {{wad}}{% endfor %}{% endif %} {% if SAVEDIR %}-savedir {{SAVEDIR}}{% endif %}"

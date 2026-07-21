@@ -1,0 +1,9 @@
+name = "doom"
+title = "The Ultimate Doom"
+is_menu_item = true
+requires = ["boom"]
+
+[vars]
+IWAD_PATH = "$MODULEDIR/DOOM.WAD"
+COMPAT_LEVEL = 3
+SAVEDIR = "$MODULEDIR/.saves"

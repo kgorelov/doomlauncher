@@ -1,7 +1,4 @@
-name = "tnt"
+[tnt]
 title = "Final Doom: TNT Evilution"
-is_menu_item = true
 requires = ["doom2"]
-
-[vars]
-PWADS = ["$MODULEDIR/TNT.WAD"]
+PWADS = ["{{MODULE_DIR}}/TNT.WAD"]

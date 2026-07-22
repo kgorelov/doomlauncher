@@ -48,28 +48,19 @@ void test_module_registry() {
     {
         std::ofstream boom_toml("test_boom.toml");
         boom_toml << R"(
-name = "boom"
-title = "Boom Engine Base"
-is_menu_item = false
-
-[vars]
+[boom]
 BOOM_BIN = "/usr/bin/boom"
-
-[templates]
-CMD = "{{BOOM_BIN}} -iwad {{IWAD_PATH}} {% if COMPAT_LEVEL %}-complevel {{COMPAT_LEVEL}}{% endif %} {% if PWADS %}{% for wad in PWADS %}-file {{wad}} {% endfor %}{% endif %}-savedir {{MODULEDIR}}/.saves"
+CMD = "{{BOOM_BIN}} -iwad {{IWAD_PATH}} {% if COMPAT_LEVEL %}-complevel {{COMPAT_LEVEL}}{% endif %} {% if PWADS %}{% for wad in PWADS %}-file {{wad}} {% endfor %}{% endif %}-savedir {{MODULE_DIR}}/.saves"
 )";
     }
 
     {
         std::ofstream doom2_toml("test_doom2.toml");
         doom2_toml << R"(
-name = "doom2"
+[doom2]
 title = "Doom II: Hell on Earth"
-is_menu_item = true
 requires = ["boom"]
-
-[vars]
-IWAD_PATH = "$MODULEDIR/DOOM2.WAD"
+IWAD_PATH = "{{MODULE_DIR}}/DOOM2.WAD"
 COMPAT_LEVEL = 2
 )";
     }
@@ -77,12 +68,9 @@ COMPAT_LEVEL = 2
     {
         std::ofstream plutonia_toml("test_plutonia.toml");
         plutonia_toml << R"(
-name = "plutonia"
+[plutonia]
 title = "Final Doom: Plutonia Experiment"
-is_menu_item = true
 requires = ["doom2"]
-
-[vars]
 PWADS = ["PLUTONIA.WAD"]
 )";
     }

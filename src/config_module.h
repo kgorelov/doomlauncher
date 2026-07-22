@@ -11,14 +11,12 @@ namespace doomlauncher {
 struct Module {
     std::string name;
     std::string title;
-    bool is_menu_item = false;
     std::string module_dir;
 
     std::vector<std::string> requires;
     std::vector<std::string> includes;
 
     Scope vars;
-    std::unordered_map<std::string, std::string> templates;
 };
 
 struct ResolvedMenuItem {

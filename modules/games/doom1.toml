@@ -1,9 +1,6 @@
-name = "doom"
+[doom]
 title = "The Ultimate Doom"
-is_menu_item = true
 requires = ["boom"]
-
-[vars]
-IWAD_PATH = "$MODULEDIR/DOOM.WAD"
+IWAD_PATH = "{{MODULE_DIR}}/DOOM.WAD"
 COMPAT_LEVEL = 3
-SAVEDIR = "$MODULEDIR/.saves"
+SAVEDIR = "{{MODULE_DIR}}/.saves"

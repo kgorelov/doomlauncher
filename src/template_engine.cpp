@@ -102,8 +102,12 @@ std::string render_interpolated_text(const std::string& text, const Scope& scope
             size_t end = text.find("}}", i + 2);
             if (end != std::string::npos) {
                 std::string var_name = trim(text.substr(i + 2, end - (i + 2)));
-                Value val = get_scope_val(var_name, scope);
-                result += val.to_string();
+                auto it = scope.find(var_name);
+                if (it != scope.end()) {
+                    result += it->second.to_string();
+                } else {
+                    result += text.substr(i, end + 2 - i);
+                }
                 i = end + 2;
                 continue;
             }
@@ -113,8 +117,12 @@ std::string render_interpolated_text(const std::string& text, const Scope& scope
             size_t end = text.find('}', i + 2);
             if (end != std::string::npos) {
                 std::string var_name = trim(text.substr(i + 2, end - (i + 2)));
-                Value val = get_scope_val(var_name, scope);
-                result += val.to_string();
+                auto it = scope.find(var_name);
+                if (it != scope.end()) {
+                    result += it->second.to_string();
+                } else {
+                    result += text.substr(i, end + 1 - i);
+                }
                 i = end + 1;
                 continue;
             }
@@ -127,8 +135,12 @@ std::string render_interpolated_text(const std::string& text, const Scope& scope
                 var_len++;
             }
             std::string var_name = text.substr(start, var_len);
-            Value val = get_scope_val(var_name, scope);
-            result += val.to_string();
+            auto it = scope.find(var_name);
+            if (it != scope.end()) {
+                result += it->second.to_string();
+            } else {
+                result += text.substr(i, 1 + var_len);
+            }
             i = start + var_len;
             continue;
         }
@@ -189,25 +201,23 @@ std::vector<ASTNode> parse_template(const std::string& template_str, size_t& pos
 
             if_node.children = parse_template(template_str, pos, "endif");
 
-            size_t next_block = template_str.find("{%", pos);
-            if (next_block != std::string::npos) {
-                size_t next_end = template_str.find("%}", next_block + 2);
-                if (next_end != std::string::npos) {
-                    std::string next_tag = trim(template_str.substr(next_block + 2, next_end - (next_block + 2)));
-                    if (next_tag == "else") {
-                        pos = next_end + 2;
+            if (pos < len && template_str.find("{%", pos) == pos) {
+                size_t end = template_str.find("%}", pos + 2);
+                if (end != std::string::npos) {
+                    std::string tag = trim(template_str.substr(pos + 2, end - (pos + 2)));
+                    if (tag == "else") {
+                        pos = end + 2;
                         if_node.else_children = parse_template(template_str, pos, "endif");
                     }
                 }
             }
 
-            next_block = template_str.find("{%", pos);
-            if (next_block != std::string::npos) {
-                size_t next_end = template_str.find("%}", next_block + 2);
-                if (next_end != std::string::npos) {
-                    std::string next_tag = trim(template_str.substr(next_block + 2, next_end - (next_block + 2)));
-                    if (next_tag == "endif") {
-                        pos = next_end + 2;
+            if (pos < len && template_str.find("{%", pos) == pos) {
+                size_t end = template_str.find("%}", pos + 2);
+                if (end != std::string::npos) {
+                    std::string tag = trim(template_str.substr(pos + 2, end - (pos + 2)));
+                    if (tag == "endif") {
+                        pos = end + 2;
                     }
                 }
             }
@@ -224,13 +234,12 @@ std::vector<ASTNode> parse_template(const std::string& template_str, size_t& pos
 
                 for_node.children = parse_template(template_str, pos, "endfor");
 
-                size_t next_block = template_str.find("{%", pos);
-                if (next_block != std::string::npos) {
-                    size_t next_end = template_str.find("%}", next_block + 2);
-                    if (next_end != std::string::npos) {
-                        std::string next_tag = trim(template_str.substr(next_block + 2, next_end - (next_block + 2)));
-                        if (next_tag == "endfor") {
-                            pos = next_end + 2;
+                if (pos < len && template_str.find("{%", pos) == pos) {
+                    size_t end = template_str.find("%}", pos + 2);
+                    if (end != std::string::npos) {
+                        std::string tag = trim(template_str.substr(pos + 2, end - (pos + 2)));
+                        if (tag == "endfor") {
+                            pos = end + 2;
                         }
                     }
                 }

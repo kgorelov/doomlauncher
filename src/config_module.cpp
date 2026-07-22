@@ -47,34 +47,13 @@ std::vector<std::string> expand_glob_pattern(const std::string& pattern) {
     return filenames;
 }
 
-void parse_single_module_table(const toml::table& tbl, Module& mod, const std::string& fallback_name, const std::string& dir_path) {
+void parse_single_module_table(const toml::table& tbl, Module& mod, const std::string& module_name, const std::string& dir_path) {
+    mod.name = module_name;
     mod.module_dir = dir_path;
-
-    if (auto name_node = tbl.get("name")) {
-        if (auto s = name_node->as_string()) {
-            mod.name = std::string(s->get());
-        }
-    }
-    if (mod.name.empty()) {
-        mod.name = fallback_name;
-    }
 
     if (auto title_node = tbl.get("title")) {
         if (auto s = title_node->as_string()) {
             mod.title = std::string(s->get());
-        }
-    }
-    if (mod.title.empty()) {
-        mod.title = mod.name;
-    }
-
-    if (auto item_node = tbl.get("is_menu_item")) {
-        if (auto b = item_node->as_boolean()) {
-            mod.is_menu_item = b->get();
-        }
-    } else if (auto item_node2 = tbl.get("menu_item")) {
-        if (auto b = item_node2->as_boolean()) {
-            mod.is_menu_item = b->get();
         }
     }
 
@@ -106,13 +85,10 @@ void parse_single_module_table(const toml::table& tbl, Module& mod, const std::s
 
     if (auto tmpl_tbl = tbl.get_as<toml::table>("templates")) {
         for (const auto& [key, val] : *tmpl_tbl) {
-            if (auto s = val.as_string()) {
-                mod.templates[std::string(key.str())] = std::string(s->get());
-            }
+            mod.vars[std::string(key.str())] = parse_toml_node(val);
         }
     }
 
-    // Top-level direct keys if not inside [vars] or [templates]
     for (const auto& [key, val] : tbl) {
         std::string k_str(key.str());
         if (k_str == "name" || k_str == "title" || k_str == "is_menu_item" || k_str == "menu_item" ||
@@ -120,12 +96,34 @@ void parse_single_module_table(const toml::table& tbl, Module& mod, const std::s
             continue;
         }
 
-        if (val.is_string() && k_str == "CMD") {
-            mod.templates[k_str] = std::string(val.as_string()->get());
-        } else if (!val.is_table() && !val.is_array()) {
-            mod.vars[k_str] = parse_toml_node(val);
+        mod.vars[k_str] = parse_toml_node(val);
+    }
+}
+
+std::string expand_module_dir(const std::string& text, const std::string& module_dir) {
+    std::string result = text;
+    std::string keys[2] = {"{{MODULE_DIR}}", "{{MODULEDIR}}"};
+    for (const auto& k : keys) {
+        size_t pos = 0;
+        while ((pos = result.find(k, pos)) != std::string::npos) {
+            result.replace(pos, k.length(), module_dir);
+            pos += module_dir.length();
         }
     }
+    return result;
+}
+
+Value expand_value_module_dir(const Value& val, const std::string& module_dir) {
+    if (val.type == Value::Type::String) {
+        return Value(expand_module_dir(val.str_val, module_dir));
+    } else if (val.type == Value::Type::Array) {
+        Array res_arr;
+        for (const auto& elem : val.arr_val) {
+            res_arr.push_back(expand_value_module_dir(elem, module_dir));
+        }
+        return Value(res_arr);
+    }
+    return val;
 }
 
 } // namespace
@@ -158,59 +156,40 @@ bool ModuleRegistry::load_file(const std::string& filepath) {
     fs::path p(filepath);
     fs::path abs_p = fs::absolute(p);
     std::string dir_path = abs_p.parent_path().string();
-    std::string stem_name = abs_p.stem().string();
 
-    // Check if file contains multiple modules under [modules] or [[module]]
-    if (auto modules_node = root.get("modules")) {
-        if (auto modules_tbl = modules_node->as_table()) {
-            for (const auto& [mod_key, mod_val] : *modules_tbl) {
-                if (auto mod_tbl = mod_val.as_table()) {
-                    Module mod;
-                    parse_single_module_table(*mod_tbl, mod, std::string(mod_key.str()), dir_path);
-                    add_module(mod);
-                }
-            }
-        } else if (auto modules_arr = modules_node->as_array()) {
-            for (const auto& elem : *modules_arr) {
-                if (auto mod_tbl = elem.as_table()) {
-                    Module mod;
-                    parse_single_module_table(*mod_tbl, mod, stem_name, dir_path);
-                    add_module(mod);
-                }
-            }
+    std::vector<Module> loaded_modules_in_file;
+
+    for (const auto& [key, val] : root) {
+        if (auto mod_tbl = val.as_table()) {
+            Module mod;
+            parse_single_module_table(*mod_tbl, mod, std::string(key.str()), dir_path);
+            add_module(mod);
+            loaded_modules_in_file.push_back(mod);
         }
-    } else {
+    }
+
+    if (loaded_modules_in_file.empty()) {
         Module mod;
-        parse_single_module_table(root, mod, stem_name, dir_path);
+        parse_single_module_table(root, mod, abs_p.stem().string(), dir_path);
         add_module(mod);
+        loaded_modules_in_file.push_back(mod);
     }
 
-    // Process includes from the newly loaded module(s)
-    std::vector<std::string> includes_to_process;
-    if (has_module(stem_name)) {
-        includes_to_process = get_module(stem_name)->includes;
-    }
-    for (const auto& [_, mod] : modules) {
-        if (mod.module_dir == dir_path) {
-            for (const auto& inc : mod.includes) {
-                includes_to_process.push_back(inc);
+    for (const auto& mod : loaded_modules_in_file) {
+        for (const auto& inc_pattern : mod.includes) {
+            fs::path inc_path(inc_pattern);
+            std::string full_pattern;
+            if (inc_path.is_relative()) {
+                full_pattern = (fs::path(dir_path) / inc_path).string();
+            } else {
+                full_pattern = inc_pattern;
             }
-        }
-    }
 
-    for (const auto& inc_pattern : includes_to_process) {
-        fs::path inc_path(inc_pattern);
-        std::string full_pattern;
-        if (inc_path.is_relative()) {
-            full_pattern = (fs::path(dir_path) / inc_path).string();
-        } else {
-            full_pattern = inc_pattern;
-        }
-
-        std::vector<std::string> matched_files = expand_glob_pattern(full_pattern);
-        for (const auto& matched_file : matched_files) {
-            if (fs::canonical(matched_file) != fs::canonical(abs_p)) {
-                load_file(matched_file);
+            std::vector<std::string> matched_files = expand_glob_pattern(full_pattern);
+            for (const auto& matched_file : matched_files) {
+                if (fs::canonical(matched_file) != fs::canonical(abs_p)) {
+                    load_file(matched_file);
+                }
             }
         }
     }
@@ -269,7 +248,7 @@ std::vector<ResolvedMenuItem> ModuleRegistry::resolve_menu_items() {
     std::vector<ResolvedMenuItem> items;
 
     for (const auto& [name, mod] : modules) {
-        if (!mod.is_menu_item) {
+        if (mod.title.empty()) {
             continue;
         }
 
@@ -285,60 +264,67 @@ std::vector<ResolvedMenuItem> ModuleRegistry::resolve_menu_items() {
         }
 
         Scope merged_scope;
-        std::unordered_map<std::string, std::string> merged_templates;
 
         for (const auto& dep_name : ordered_deps) {
             const Module* dep_mod = get_module(dep_name);
             if (!dep_mod) continue;
 
-            merged_scope["MODULEDIR"] = Value(dep_mod->module_dir);
-            merged_scope["MODULENAME"] = Value(dep_mod->name);
-            merged_scope[dep_mod->name + ".MODULEDIR"] = Value(dep_mod->module_dir);
+            Scope dir_scope;
+            dir_scope["MODULE_DIR"] = Value(dep_mod->module_dir);
+            dir_scope["MODULEDIR"] = Value(dep_mod->module_dir);
+            dir_scope["MODULE_NAME"] = Value(dep_mod->name);
+            dir_scope["MODULENAME"] = Value(dep_mod->name);
+            dir_scope[dep_mod->name + ".MODULE_DIR"] = Value(dep_mod->module_dir);
+            dir_scope[dep_mod->name + ".MODULEDIR"] = Value(dep_mod->module_dir);
 
             for (const auto& [k, v] : dep_mod->vars) {
-                if (v.type == Value::Type::String) {
-                    std::string expanded = TemplateEngine::render(v.str_val, merged_scope);
-                    merged_scope[k] = Value(expanded);
-                } else if (v.type == Value::Type::Array) {
-                    Array expanded_arr;
-                    for (const auto& elem : v.arr_val) {
-                        if (elem.type == Value::Type::String) {
-                            expanded_arr.push_back(Value(TemplateEngine::render(elem.str_val, merged_scope)));
-                        } else {
-                            expanded_arr.push_back(elem);
-                        }
-                    }
-                    merged_scope[k] = Value(expanded_arr);
-                } else {
-                    merged_scope[k] = v;
-                }
-            }
-
-            for (const auto& [k, t] : dep_mod->templates) {
-                merged_templates[k] = t;
+                merged_scope[k] = expand_value_module_dir(v, dep_mod->module_dir);
             }
         }
 
         // Target module overrides
+        merged_scope["MODULE_DIR"] = Value(mod.module_dir);
         merged_scope["MODULEDIR"] = Value(mod.module_dir);
+        merged_scope["MODULE_NAME"] = Value(mod.name);
         merged_scope["MODULENAME"] = Value(mod.name);
 
         ResolvedMenuItem item;
         item.module_name = mod.name;
         item.title = mod.title;
 
-        // Render all templates (with multi-pass stability)
-        for (const auto& [tmpl_name, tmpl_str] : merged_templates) {
-            std::string current = tmpl_str;
-            for (int pass = 0; pass < 5; ++pass) {
-                std::string next = TemplateEngine::render(current, merged_scope);
-                if (next == current) break;
-                current = next;
+        for (int pass = 0; pass < 5; ++pass) {
+            bool any_changed = false;
+            Scope current_scope = merged_scope;
+            for (const auto& [k, v] : current_scope) {
+                if (v.type == Value::Type::String) {
+                    std::string rendered = TemplateEngine::render(v.str_val, merged_scope);
+                    if (rendered != v.str_val) {
+                        merged_scope[k] = Value(rendered);
+                        any_changed = true;
+                    }
+                } else if (v.type == Value::Type::Array) {
+                    Array rendered_arr;
+                    bool arr_changed = false;
+                    for (const auto& elem : v.arr_val) {
+                        if (elem.type == Value::Type::String) {
+                            std::string rendered = TemplateEngine::render(elem.str_val, merged_scope);
+                            if (rendered != elem.str_val) arr_changed = true;
+                            rendered_arr.push_back(Value(rendered));
+                        } else {
+                            rendered_arr.push_back(elem);
+                        }
+                    }
+                    if (arr_changed) {
+                        merged_scope[k] = Value(rendered_arr);
+                        any_changed = true;
+                    }
+                }
             }
-            merged_scope[tmpl_name] = Value(current);
-            if (tmpl_name == "CMD") {
-                item.cmd = current;
-            }
+            if (!any_changed) break;
+        }
+
+        if (merged_scope.find("CMD") != merged_scope.end()) {
+            item.cmd = merged_scope["CMD"].to_string();
         }
 
         item.vars = merged_scope;

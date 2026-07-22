@@ -1,5 +1,4 @@
-name = "main"
-
+[main]
 includes = [
     "engines/*.toml",
     "games/*.toml"

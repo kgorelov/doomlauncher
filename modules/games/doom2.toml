@@ -1,9 +1,6 @@
-name = "doom2"
+[doom2]
 title = "Doom II: Hell on Earth"
-is_menu_item = true
 requires = ["boom"]
-
-[vars]
-IWAD_PATH = "$MODULEDIR/DOOM2.WAD"
+IWAD_PATH = "{{MODULE_DIR}}/DOOM2.WAD"
 COMPAT_LEVEL = 2
-SAVEDIR = "$MODULEDIR/.saves"
+SAVEDIR = "{{MODULE_DIR}}/.saves"

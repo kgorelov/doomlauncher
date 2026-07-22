@@ -1,7 +1,4 @@
-name = "sigil"
+[sigil]
 title = "Sigil"
-is_menu_item = true
 requires = ["doom"]
-
-[vars]
-PWADS = ["$MODULEDIR/SIGIL.WAD"]
+PWADS = ["{{MODULE_DIR}}/SIGIL.WAD"]

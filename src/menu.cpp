@@ -81,6 +81,7 @@ void Menu::render() {
         renderText(font, menuItems[i].title, 0, y, color, true);
     }
 
+#if 0
     // Render command preview / status message at bottom
     if (selectedItem >= 0 && selectedItem < static_cast<int>(menuItems.size())) {
         const auto& item = menuItems[selectedItem];
@@ -93,6 +94,7 @@ void Menu::render() {
             renderText(smallFont, preview, 0, screenHeight - 50, yellow, true);
         }
     }
+#endif
 }
 
 bool Menu::isQuitSelected() const {

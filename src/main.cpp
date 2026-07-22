@@ -15,7 +15,40 @@ namespace fs = std::filesystem;
 const int SCREEN_WIDTH = 800;
 const int SCREEN_HEIGHT = 600;
 
+void print_help(const char* prog_name) {
+    std::cout << "Usage: " << prog_name << " [options] [config_path]\n\n"
+              << "Options:\n"
+              << "  -h, --help               Show this help message and exit\n"
+              << "  -m, --module <path>      Specify a module config file or directory to load (can be repeated)\n";
+}
+
 int main(int argc, char* argv[]) {
+    std::vector<std::string> modulePaths;
+
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "-h" || arg == "--help") {
+            print_help(argv[0]);
+            return 0;
+        } else if (arg == "-m" || arg == "--module") {
+            if (i + 1 < argc) {
+                modulePaths.push_back(argv[++i]);
+            } else {
+                std::cerr << "Error: " << arg << " requires a path argument.\n";
+                print_help(argv[0]);
+                return 1;
+            }
+        } else if (arg.rfind("--module=", 0) == 0) {
+            modulePaths.push_back(arg.substr(9));
+        } else if (!arg.empty() && arg[0] == '-') {
+            std::cerr << "Error: Unknown option '" << arg << "'\n";
+            print_help(argv[0]);
+            return 1;
+        } else {
+            modulePaths.push_back(arg);
+        }
+    }
+
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         std::cerr << "Could not initialize SDL: " << SDL_GetError() << std::endl;
         return 1;
@@ -75,19 +108,30 @@ int main(int argc, char* argv[]) {
 
     // Load config modules
     doomlauncher::ModuleRegistry registry;
-    std::string configPath = "modules/main.toml";
-    if (argc > 1) {
-        configPath = argv[1];
-    }
 
-    if (fs::exists(configPath)) {
-        std::cout << "Loading config file: " << configPath << std::endl;
-        registry.load_file(configPath);
-    } else if (fs::exists("modules")) {
-        std::cout << "Loading modules directory..." << std::endl;
-        registry.load_directory("modules");
+    if (!modulePaths.empty()) {
+        for (const auto& path : modulePaths) {
+            if (fs::is_directory(path)) {
+                std::cout << "Loading modules directory: " << path << std::endl;
+                registry.load_directory(path);
+            } else if (fs::exists(path)) {
+                std::cout << "Loading config file: " << path << std::endl;
+                registry.load_file(path);
+            } else {
+                std::cerr << "Error: Specified path does not exist: " << path << std::endl;
+            }
+        }
     } else {
-        std::cerr << "Warning: No config modules found!" << std::endl;
+        std::string configPath = "modules/main.toml";
+        if (fs::exists(configPath)) {
+            std::cout << "Loading config file: " << configPath << std::endl;
+            registry.load_file(configPath);
+        } else if (fs::exists("modules")) {
+            std::cout << "Loading modules directory..." << std::endl;
+            registry.load_directory("modules");
+        } else {
+            std::cerr << "Warning: No config modules found!" << std::endl;
+        }
     }
 
     std::vector<doomlauncher::ResolvedMenuItem> resolvedItems = registry.resolve_menu_items();

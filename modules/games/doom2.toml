@@ -1,6 +1,7 @@
 [doom2]
+type = "game"
 title = "Doom II: Hell on Earth"
-#requires = ["boom"]
-IWAD_PATH = "{{MODULE_DIR}}/DOOM2.WAD"
-COMPAT_LEVEL = 2
-SAVEDIR = "{{MODULE_DIR}}/.saves"
+iwad = "DOOM2.WAD"
+compat_level = 2
+requires_capability = ["vanilla"]
+savedir = "{{MODULE_DIR}}/.saves"

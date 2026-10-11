@@ -1,6 +1,7 @@
 [doom]
+type = "game"
 title = "The Ultimate Doom"
-requires = ["boom"]
-IWAD_PATH = "{{MODULE_DIR}}/DOOM.WAD"
-COMPAT_LEVEL = 3
-SAVEDIR = "{{MODULE_DIR}}/.saves"
+iwad = "DOOM.WAD"
+compat_level = 3
+requires_capability = ["vanilla"]
+savedir = "{{MODULE_DIR}}/.saves"

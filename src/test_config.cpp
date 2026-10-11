@@ -113,8 +113,9 @@ void test_real_modules() {
     for (const auto& item : menu_items) {
         std::cout << "Menu Item: '" << item.title << "' (" << item.module_name << ")" << std::endl;
         std::cout << "  CMD: " << item.cmd << std::endl;
+        assert(!item.cmd.empty());
     }
-    assert(menu_items.size() > 0);
+    assert(menu_items.size() == 5);
     std::cout << "Real modules test passed!" << std::endl << std::endl;
 }
 
@@ -397,6 +398,93 @@ requires_capability = ["vanilla"]
     std::cout << "Dynamic Engine Fallback tests passed!" << std::endl << std::endl;
 }
 
+void test_game_module_modern_schema() {
+    std::cout << "--- Running Game Module Modern Schema tests ---" << std::endl;
+    namespace fs = std::filesystem;
+
+    fs::path temp_dir = "temp_schema_assets";
+    fs::create_directories(temp_dir);
+    {
+        std::ofstream f(temp_dir / "DOOM2.WAD");
+        f << "IWAD";
+    }
+    {
+        std::ofstream f(temp_dir / "MOD.WAD");
+        f << "PWAD";
+    }
+
+    // Engine definition
+    {
+        std::ofstream f("test_schema_engine.toml");
+        f << R"(
+[test-eng]
+type = "engine"
+title = "Test Engine"
+binary = "sh"
+capabilities = ["vanilla", "boom"]
+cmd = "{{BIN}} -iwad {{IWAD_PATH}} {% if COMPAT_LEVEL %}-complevel {{COMPAT_LEVEL}}{% endif %}{% if PWADS %}{% for wad in PWADS %} -file {{wad}}{% endfor %}{% endif %}"
+)";
+    }
+
+    // Base game definition using modern lowercase keys: iwad, compat_level, requires_capability
+    {
+        std::ofstream f("test_schema_base.toml");
+        f << R"(
+[base_game]
+type = "game"
+title = "Base Game"
+iwad = "DOOM2.WAD"
+compat_level = 2
+requires_capability = ["vanilla"]
+)";
+    }
+
+    // Addon mod definition using base_game, pwads
+    {
+        std::ofstream f("test_schema_mod.toml");
+        f << R"(
+[addon_mod]
+type = "game"
+title = "Addon Mod"
+base_game = "base_game"
+pwads = ["MOD.WAD"]
+)";
+    }
+
+    ModuleRegistry registry;
+    registry.get_asset_resolver().add_search_dir(temp_dir.string());
+
+    assert(registry.load_file("test_schema_engine.toml"));
+    assert(registry.load_file("test_schema_base.toml"));
+    assert(registry.load_file("test_schema_mod.toml"));
+
+    std::vector<ResolvedMenuItem> items = registry.resolve_menu_items();
+    assert(items.size() == 2); // Base Game and Addon Mod
+
+    for (const auto& item : items) {
+        if (item.module_name == "base_game") {
+            assert(item.assets_found);
+            assert(!item.cmd.empty());
+            assert(item.cmd.find("-complevel 2") != std::string::npos);
+            assert(item.cmd.find("DOOM2.WAD") != std::string::npos);
+        } else if (item.module_name == "addon_mod") {
+            assert(item.assets_found);
+            assert(!item.cmd.empty());
+            assert(item.cmd.find("DOOM2.WAD") != std::string::npos);
+            assert(item.cmd.find("MOD.WAD") != std::string::npos);
+            // Inherited compat_level 2 and capability vanilla from base_game
+            assert(item.cmd.find("-complevel 2") != std::string::npos);
+        }
+    }
+
+    fs::remove_all(temp_dir);
+    std::remove("test_schema_engine.toml");
+    std::remove("test_schema_base.toml");
+    std::remove("test_schema_mod.toml");
+
+    std::cout << "Game Module Modern Schema tests passed!" << std::endl << std::endl;
+}
+
 int main() {
     test_template_engine();
     test_module_registry();
@@ -405,6 +493,7 @@ int main() {
     test_module_registry_asset_resolution();
     test_engine_registry();
     test_dynamic_engine_fallback();
+    test_game_module_modern_schema();
     std::cout << "ALL TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;
 }

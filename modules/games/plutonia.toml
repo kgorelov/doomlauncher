@@ -1,4 +1,7 @@
 [plutonia]
+type = "game"
 title = "Final Doom: The Plutonia Experiment"
-requires = ["doom2"]
-PWADS = ["{{MODULE_DIR}}/PLUTONIA.WAD"]
+base_game = "doom2"
+pwads = ["PLUTONIA.WAD"]
+compat_level = 4
+requires_capability = ["vanilla"]

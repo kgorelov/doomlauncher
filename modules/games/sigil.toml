@@ -1,4 +1,7 @@
 [sigil]
+type = "game"
 title = "Sigil"
-requires = ["doom"]
-PWADS = ["{{MODULE_DIR}}/SIGIL.WAD"]
+base_game = "doom"
+pwads = ["SIGIL.WAD"]
+compat_level = 3
+requires_capability = ["vanilla"]

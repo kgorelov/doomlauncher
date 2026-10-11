@@ -89,6 +89,15 @@ void parse_single_module_table(const toml::table& tbl, Module& mod, const std::s
         }
     }
 
+    if (auto base_node = tbl.get("base_game")) {
+        if (auto s = base_node->as_string()) {
+            std::string bg = std::string(s->get());
+            if (!bg.empty() && std::find(mod.requires.begin(), mod.requires.end(), bg) == mod.requires.end()) {
+                mod.requires.push_back(bg);
+            }
+        }
+    }
+
     if (auto type_node = tbl.get("type")) {
         if (auto s = type_node->as_string()) {
             mod.type = std::string(s->get());
@@ -111,11 +120,44 @@ void parse_single_module_table(const toml::table& tbl, Module& mod, const std::s
         std::string k_str(key.str());
         if (k_str == "name" || k_str == "title" || k_str == "is_menu_item" || k_str == "menu_item" ||
             k_str == "requires" || k_str == "includes" || k_str == "vars" || k_str == "templates" || k_str == "modules" ||
-            k_str == "type" || k_str == "requires_capability") {
+            k_str == "type" || k_str == "requires_capability" || k_str == "base_game") {
             continue;
         }
 
         mod.vars[k_str] = parse_toml_node(val);
+    }
+
+    // Populate alias keys for convenience and backward compatibility
+    if (mod.vars.find("iwad") != mod.vars.end() && mod.vars.find("IWAD_PATH") == mod.vars.end()) {
+        mod.vars["IWAD_PATH"] = mod.vars["iwad"];
+        mod.vars["IWAD"] = mod.vars["iwad"];
+    } else if (mod.vars.find("IWAD_PATH") != mod.vars.end() && mod.vars.find("iwad") == mod.vars.end()) {
+        mod.vars["iwad"] = mod.vars["IWAD_PATH"];
+        mod.vars["IWAD"] = mod.vars["IWAD_PATH"];
+    }
+
+    if (mod.vars.find("pwads") != mod.vars.end()) {
+        if (mod.vars["pwads"].type == Value::Type::String) {
+            mod.vars["pwads"] = Value(Array{mod.vars["pwads"]});
+        }
+        mod.vars["PWADS"] = mod.vars["pwads"];
+    } else if (mod.vars.find("PWADS") != mod.vars.end()) {
+        if (mod.vars["PWADS"].type == Value::Type::String) {
+            mod.vars["PWADS"] = Value(Array{mod.vars["PWADS"]});
+        }
+        mod.vars["pwads"] = mod.vars["PWADS"];
+    }
+
+    if (mod.vars.find("compat_level") != mod.vars.end() && mod.vars.find("COMPAT_LEVEL") == mod.vars.end()) {
+        mod.vars["COMPAT_LEVEL"] = mod.vars["compat_level"];
+    } else if (mod.vars.find("COMPAT_LEVEL") != mod.vars.end() && mod.vars.find("compat_level") == mod.vars.end()) {
+        mod.vars["compat_level"] = mod.vars["COMPAT_LEVEL"];
+    }
+
+    if (mod.vars.find("savedir") != mod.vars.end() && mod.vars.find("SAVEDIR") == mod.vars.end()) {
+        mod.vars["SAVEDIR"] = mod.vars["savedir"];
+    } else if (mod.vars.find("SAVEDIR") != mod.vars.end() && mod.vars.find("savedir") == mod.vars.end()) {
+        mod.vars["savedir"] = mod.vars["SAVEDIR"];
     }
 }
 
@@ -499,6 +541,15 @@ std::vector<ResolvedMenuItem> ModuleRegistry::resolve_menu_items() {
 
         // Engine matching and dynamic CMD generation
         std::vector<std::string> req_caps = mod.requires_capability;
+        if (req_caps.empty()) {
+            for (const auto& dep_name : ordered_deps) {
+                const Module* dep_mod = get_module(dep_name);
+                if (dep_mod && !dep_mod->requires_capability.empty()) {
+                    req_caps = dep_mod->requires_capability;
+                    break;
+                }
+            }
+        }
         if (req_caps.empty()) {
             req_caps.push_back("vanilla");
         }

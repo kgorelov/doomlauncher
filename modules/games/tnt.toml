@@ -1,4 +1,7 @@
 [tnt]
+type = "game"
 title = "Final Doom: TNT Evilution"
-requires = ["doom2"]
-PWADS = ["{{MODULE_DIR}}/TNT.WAD"]
+base_game = "doom2"
+pwads = ["TNT.WAD"]
+compat_level = 4
+requires_capability = ["vanilla"]

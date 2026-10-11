@@ -1,6 +1,6 @@
 [doom2]
 title = "Doom II: Hell on Earth"
-requires = ["boom"]
+#requires = ["boom"]
 IWAD_PATH = "{{MODULE_DIR}}/DOOM2.WAD"
 COMPAT_LEVEL = 2
 SAVEDIR = "{{MODULE_DIR}}/.saves"

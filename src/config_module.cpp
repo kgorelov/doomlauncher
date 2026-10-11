@@ -128,6 +128,24 @@ Value expand_value_module_dir(const Value& val, const std::string& module_dir) {
 
 } // namespace
 
+void ModuleRegistry::set_asset_resolver(const AssetResolver& resolver) {
+    asset_resolver = resolver;
+}
+
+AssetResolver& ModuleRegistry::get_asset_resolver() {
+    return asset_resolver;
+}
+
+const AssetResolver& ModuleRegistry::get_asset_resolver() const {
+    return asset_resolver;
+}
+
+bool ModuleRegistry::load_user_config(const std::string& config_path) {
+    UserConfig cfg = AssetResolver::load_config(config_path);
+    asset_resolver = AssetResolver(cfg);
+    return true;
+}
+
 void ModuleRegistry::add_module(const Module& module) {
     modules[module.name] = module;
 }
@@ -292,6 +310,86 @@ std::vector<ResolvedMenuItem> ModuleRegistry::resolve_menu_items() {
         item.module_name = mod.name;
         item.title = mod.title;
 
+        // 1. Initial template interpolation of asset variables
+        std::string iwad_key;
+        if (merged_scope.find("IWAD_PATH") != merged_scope.end()) iwad_key = "IWAD_PATH";
+        else if (merged_scope.find("IWAD") != merged_scope.end()) iwad_key = "IWAD";
+        else if (merged_scope.find("iwad") != merged_scope.end()) iwad_key = "iwad";
+
+        if (!iwad_key.empty() && merged_scope[iwad_key].type == Value::Type::String) {
+            merged_scope[iwad_key] = Value(TemplateEngine::render(merged_scope[iwad_key].str_val, merged_scope));
+        }
+
+        std::string pwad_key;
+        if (merged_scope.find("PWADS") != merged_scope.end()) pwad_key = "PWADS";
+        else if (merged_scope.find("pwads") != merged_scope.end()) pwad_key = "pwads";
+
+        if (!pwad_key.empty()) {
+            if (merged_scope[pwad_key].type == Value::Type::Array) {
+                Array arr;
+                for (const auto& elem : merged_scope[pwad_key].arr_val) {
+                    if (elem.type == Value::Type::String) {
+                        arr.push_back(Value(TemplateEngine::render(elem.str_val, merged_scope)));
+                    } else {
+                        arr.push_back(elem);
+                    }
+                }
+                merged_scope[pwad_key] = Value(arr);
+            } else if (merged_scope[pwad_key].type == Value::Type::String) {
+                merged_scope[pwad_key] = Value(TemplateEngine::render(merged_scope[pwad_key].str_val, merged_scope));
+            }
+        }
+
+        // 2. Asset resolution step
+        if (!iwad_key.empty()) {
+            std::string raw_iwad = merged_scope[iwad_key].to_string();
+            if (!raw_iwad.empty()) {
+                std::string resolved = asset_resolver.resolve(raw_iwad, mod.module_dir);
+                if (!resolved.empty()) {
+                    item.resolved_iwad_path = resolved;
+                    merged_scope["IWAD_PATH"] = Value(resolved);
+                    merged_scope["IWAD"] = Value(resolved);
+                    merged_scope["iwad"] = Value(resolved);
+                } else {
+                    item.assets_found = false;
+                    item.missing_assets.push_back(raw_iwad);
+                }
+            }
+        }
+
+        if (!pwad_key.empty()) {
+            const auto& pwad_val = merged_scope[pwad_key];
+            if (pwad_val.type == Value::Type::Array) {
+                Array resolved_arr;
+                for (const auto& elem : pwad_val.arr_val) {
+                    std::string raw_pwad = elem.to_string();
+                    std::string resolved = asset_resolver.resolve(raw_pwad, mod.module_dir);
+                    if (!resolved.empty()) {
+                        resolved_arr.push_back(Value(resolved));
+                        item.resolved_pwad_paths.push_back(resolved);
+                    } else {
+                        resolved_arr.push_back(Value(raw_pwad));
+                        item.assets_found = false;
+                        item.missing_assets.push_back(raw_pwad);
+                    }
+                }
+                merged_scope["PWADS"] = Value(resolved_arr);
+                merged_scope["pwads"] = Value(resolved_arr);
+            } else if (pwad_val.type == Value::Type::String && !pwad_val.str_val.empty()) {
+                std::string raw_pwad = pwad_val.str_val;
+                std::string resolved = asset_resolver.resolve(raw_pwad, mod.module_dir);
+                if (!resolved.empty()) {
+                    item.resolved_pwad_paths.push_back(resolved);
+                    merged_scope["PWADS"] = Value(Array{Value(resolved)});
+                    merged_scope["pwads"] = Value(Array{Value(resolved)});
+                } else {
+                    item.assets_found = false;
+                    item.missing_assets.push_back(raw_pwad);
+                }
+            }
+        }
+
+        // 3. Template evaluation passes across all variables (CMD, etc.)
         for (int pass = 0; pass < 5; ++pass) {
             bool any_changed = false;
             Scope current_scope = merged_scope;

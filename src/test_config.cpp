@@ -1,6 +1,7 @@
 #include "config_module.h"
 #include "template_engine.h"
 #include <cassert>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 
@@ -117,10 +118,161 @@ void test_real_modules() {
     std::cout << "Real modules test passed!" << std::endl << std::endl;
 }
 
+void test_asset_resolver() {
+    std::cout << "--- Running AssetResolver & UserConfig tests ---" << std::endl;
+    namespace fs = std::filesystem;
+
+    fs::path temp_dir = "temp_test_assets";
+    fs::create_directories(temp_dir / "sub");
+
+    // Create a mock DOOM2.WAD (uppercase)
+    {
+        std::ofstream f(temp_dir / "DOOM2.WAD");
+        f << "IWAD";
+    }
+
+    // Create a mock mod in subfolder
+    {
+        std::ofstream f(temp_dir / "sub" / "Eviternity.wad");
+        f << "PWAD";
+    }
+
+    AssetResolver resolver;
+    resolver.add_search_dir(temp_dir.string());
+
+    // 1. Case-insensitive lookup in root dir
+    std::string found_doom2 = resolver.resolve("doom2.wad");
+    std::cout << "Resolved doom2.wad: " << found_doom2 << std::endl;
+    assert(!found_doom2.empty());
+    assert(fs::path(found_doom2).filename().string() == "DOOM2.WAD");
+
+    // 2. Case-insensitive lookup in subfolder (recursive)
+    std::string found_mod = resolver.resolve("EVITERNITY.WAD");
+    std::cout << "Resolved EVITERNITY.WAD: " << found_mod << std::endl;
+    assert(!found_mod.empty());
+    assert(fs::path(found_mod).filename().string() == "Eviternity.wad");
+
+    // 3. Missing file returns empty string
+    std::string not_found = resolver.resolve("NONEXISTENT.WAD");
+    assert(not_found.empty());
+
+    // 4. Test IWAD aliases
+    resolver.set_iwad_alias("doom", (temp_dir / "DOOM2.WAD").string());
+    std::string found_alias = resolver.resolve("doom");
+    assert(!found_alias.empty());
+
+    // 5. Test UserConfig TOML loading
+    {
+        std::ofstream cfg("temp_config.toml");
+        cfg << R"(
+[paths]
+wad_dirs = ["temp_test_assets"]
+
+[preferences]
+default_engine = "dsda-doom"
+
+[iwads]
+doom2 = "temp_test_assets/DOOM2.WAD"
+)";
+    }
+
+    UserConfig user_cfg = AssetResolver::load_config("temp_config.toml");
+    assert(user_cfg.wad_dirs.size() == 1);
+    assert(user_cfg.wad_dirs[0] == "temp_test_assets");
+    assert(user_cfg.default_engine == "dsda-doom");
+    assert(user_cfg.iwads.find("doom2") != user_cfg.iwads.end());
+
+    // Clean up
+    fs::remove_all(temp_dir);
+    fs::remove("temp_config.toml");
+
+    std::cout << "AssetResolver tests passed!" << std::endl << std::endl;
+}
+
+void test_module_registry_asset_resolution() {
+    std::cout << "--- Running ModuleRegistry Asset Resolution tests ---" << std::endl;
+    namespace fs = std::filesystem;
+
+    fs::path temp_dir = "temp_reg_assets";
+    fs::create_directories(temp_dir);
+
+    {
+        std::ofstream f(temp_dir / "DOOM2.WAD");
+        f << "IWAD";
+    }
+
+    // Engine module
+    {
+        std::ofstream f("test_eng.toml");
+        f << R"(
+[eng]
+CMD = "engine -iwad {{IWAD_PATH}} {% if PWADS %}-file {{PWADS[0]}}{% endif %}"
+)";
+    }
+
+    // Game module using logical filename "doom2.wad" (lowercase, whereas file on disk is DOOM2.WAD)
+    {
+        std::ofstream f("test_game.toml");
+        f << R"(
+[game1]
+title = "Test Game Found"
+requires = ["eng"]
+IWAD_PATH = "doom2.wad"
+)";
+    }
+
+    // Game module with missing asset
+    {
+        std::ofstream f("test_missing.toml");
+        f << R"(
+[game2]
+title = "Test Game Missing"
+requires = ["eng"]
+IWAD_PATH = "missing_iwad.wad"
+)";
+    }
+
+    ModuleRegistry registry;
+    registry.get_asset_resolver().add_search_dir(temp_dir.string());
+
+    assert(registry.load_file("test_eng.toml"));
+    assert(registry.load_file("test_game.toml"));
+    assert(registry.load_file("test_missing.toml"));
+
+    std::vector<ResolvedMenuItem> items = registry.resolve_menu_items();
+    assert(items.size() == 2);
+
+    for (const auto& item : items) {
+        if (item.module_name == "game1") {
+            assert(item.assets_found == true);
+            assert(item.missing_assets.empty());
+            assert(!item.resolved_iwad_path.empty());
+            // Verify that CMD has the resolved path!
+            assert(item.cmd.find(item.resolved_iwad_path) != std::string::npos);
+            std::cout << "Game1 resolved CMD: " << item.cmd << std::endl;
+        } else if (item.module_name == "game2") {
+            assert(item.assets_found == false);
+            assert(!item.missing_assets.empty());
+            assert(item.missing_assets[0] == "missing_iwad.wad");
+            std::cout << "Game2 missing asset correctly flagged: " << item.missing_assets[0] << std::endl;
+        }
+    }
+
+    // Clean up
+    fs::remove_all(temp_dir);
+    fs::remove("test_eng.toml");
+    fs::remove("test_game.toml");
+    fs::remove("test_missing.toml");
+
+    std::cout << "ModuleRegistry Asset Resolution tests passed!" << std::endl << std::endl;
+}
+
 int main() {
     test_template_engine();
     test_module_registry();
     test_real_modules();
+    test_asset_resolver();
+    test_module_registry_asset_resolution();
     std::cout << "ALL TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;
 }

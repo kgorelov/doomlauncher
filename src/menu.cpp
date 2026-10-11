@@ -48,6 +48,12 @@ void Menu::launchSelected() {
     if (selectedItem < 0 || selectedItem >= static_cast<int>(menuItems.size())) return;
 
     const auto& item = menuItems[selectedItem];
+    if (!item.assets_found) {
+        statusMessage = "Cannot launch: missing asset (" + (item.missing_assets.empty() ? "unknown" : item.missing_assets[0]) + ")";
+        std::cout << statusMessage << std::endl;
+        return;
+    }
+
     if (item.cmd.empty()) {
         statusMessage = "No CMD defined for " + item.title;
         std::cout << statusMessage << std::endl;
@@ -70,31 +76,49 @@ void Menu::render() {
     SDL_Color white = { 255, 255, 255, 255 };
     SDL_Color red = { 255, 0, 0, 255 };
     SDL_Color yellow = { 255, 255, 0, 255 };
+    SDL_Color gray = { 130, 130, 130, 255 };
+    SDL_Color darkRed = { 180, 50, 50, 255 };
 
     int fontHeight = TTF_FontHeight(font);
     int totalMenuHeight = static_cast<int>(menuItems.size()) * fontHeight;
     int startY = (screenHeight - totalMenuHeight) / 2;
 
     for (size_t i = 0; i < menuItems.size(); ++i) {
-        SDL_Color color = (static_cast<int>(i) == selectedItem) ? red : white;
+        const auto& item = menuItems[i];
+        bool isSelected = (static_cast<int>(i) == selectedItem);
+        SDL_Color color;
+        if (!item.assets_found) {
+            color = isSelected ? darkRed : gray;
+        } else {
+            color = isSelected ? red : white;
+        }
+
         int y = startY + static_cast<int>(i) * fontHeight;
-        renderText(font, menuItems[i].title, 0, y, color, true);
+        std::string displayText = item.title;
+        if (!item.assets_found && !item.missing_assets.empty()) {
+            displayText += " [Missing Asset]";
+        }
+        renderText(font, displayText, 0, y, color, true);
     }
 
-#if 0
     // Render command preview / status message at bottom
     if (selectedItem >= 0 && selectedItem < static_cast<int>(menuItems.size())) {
         const auto& item = menuItems[selectedItem];
-        std::string preview = item.module_name == "quit" ? "Exit Doom Launcher" : "CMD: " + item.cmd;
+        std::string preview;
         if (!statusMessage.empty()) {
             preview = statusMessage;
+        } else if (!item.assets_found && !item.missing_assets.empty()) {
+            preview = "Asset missing: " + item.missing_assets[0];
+        } else if (item.module_name == "quit") {
+            preview = "Exit Doom Launcher";
+        } else {
+            preview = "CMD: " + item.cmd;
         }
 
         if (smallFont) {
             renderText(smallFont, preview, 0, screenHeight - 50, yellow, true);
         }
     }
-#endif
 }
 
 bool Menu::isQuitSelected() const {

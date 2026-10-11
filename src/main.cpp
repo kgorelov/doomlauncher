@@ -108,6 +108,7 @@ int main(int argc, char* argv[]) {
 
     // Load config modules
     doomlauncher::ModuleRegistry registry;
+    registry.load_user_config();
 
     if (!modulePaths.empty()) {
         for (const auto& path : modulePaths) {

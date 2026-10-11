@@ -1,3 +1,9 @@
 [gzdoom]
+type = "engine"
+title = "GZDoom"
+binary = "gzdoom"
+binaries = ["gzdoom"]
+capabilities = ["vanilla", "limit-removing", "boom", "mbf", "mbf21", "zdoom", "gzdoom", "pk3", "udmf"]
+cmd = "{{BIN}} -iwad {{IWAD_PATH}}{% if PWADS %}{% for wad in PWADS %} -file {{wad}}{% endfor %}{% endif %} {% if SAVEDIR %}-savedir {{SAVEDIR}}{% endif %}"
 GZDOOM_BIN = "gzdoom"
 CMD = "{{GZDOOM_BIN}} -iwad {{IWAD_PATH}}{% if PWADS %}{% for wad in PWADS %} -file {{wad}}{% endfor %}{% endif %} {% if SAVEDIR %}-savedir {{SAVEDIR}}{% endif %}"

@@ -1,3 +1,9 @@
 [boom]
+type = "engine"
+title = "Boom / PrBoom+"
+binary = "boom"
+binaries = ["prboom-plus", "boom"]
+capabilities = ["vanilla", "limit-removing", "boom", "complevel"]
+cmd = "{{BIN}} -iwad {{IWAD_PATH}} {% if COMPAT_LEVEL %}-complevel {{COMPAT_LEVEL}}{% endif %}{% if PWADS %}{% for wad in PWADS %} -file {{wad}}{% endfor %}{% endif %} {% if SAVEDIR %}-save {{SAVEDIR}}{% endif %}"
 BOOM_BIN = "boom"
 CMD = "{{BOOM_BIN}} -iwad {{IWAD_PATH}} {% if COMPAT_LEVEL %}-complevel {{COMPAT_LEVEL}}{% endif %}{% if PWADS %}{% for wad in PWADS %} -file {{wad}}{% endfor %}{% endif %} {% if SAVEDIR %}-save {{SAVEDIR}}{% endif %}"

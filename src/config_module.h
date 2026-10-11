@@ -2,6 +2,7 @@
 #define CONFIG_MODULE_H
 
 #include "asset_resolver.h"
+#include "engine_registry.h"
 #include "template_engine.h"
 #include <string>
 #include <unordered_map>
@@ -13,9 +14,11 @@ struct Module {
     std::string name;
     std::string title;
     std::string module_dir;
+    std::string type;
 
     std::vector<std::string> requires;
     std::vector<std::string> includes;
+    std::vector<std::string> requires_capability;
 
     Scope vars;
 };
@@ -30,6 +33,9 @@ struct ResolvedMenuItem {
     std::vector<std::string> missing_assets;
     std::string resolved_iwad_path;
     std::vector<std::string> resolved_pwad_paths;
+
+    std::vector<EngineInfo> compatible_engines;
+    size_t selected_engine_index = 0;
 };
 
 class ModuleRegistry {
@@ -44,6 +50,10 @@ public:
     AssetResolver& get_asset_resolver();
     const AssetResolver& get_asset_resolver() const;
 
+    void set_engine_registry(const EngineRegistry& registry);
+    EngineRegistry& get_engine_registry();
+    const EngineRegistry& get_engine_registry() const;
+
     void add_module(const Module& module);
     const Module* get_module(const std::string& name) const;
     bool has_module(const std::string& name) const;
@@ -53,6 +63,7 @@ public:
 private:
     std::unordered_map<std::string, Module> modules;
     AssetResolver asset_resolver;
+    EngineRegistry engine_registry;
 
     void resolve_dependencies_recursive(
         const std::string& module_name,

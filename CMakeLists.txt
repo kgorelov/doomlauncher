@@ -23,6 +23,7 @@ add_executable(doomlauncher
     src/template_engine.cpp
     src/config_module.cpp
     src/asset_resolver.cpp
+    src/engine_registry.cpp
 )
 
 target_link_libraries(doomlauncher PUBLIC ${SDL2_LIBRARY} ${SDL2_TTF_LIBRARY})
@@ -33,4 +34,5 @@ add_executable(test_config
     src/template_engine.cpp
     src/config_module.cpp
     src/asset_resolver.cpp
+    src/engine_registry.cpp
 )

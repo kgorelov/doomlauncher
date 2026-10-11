@@ -267,12 +267,144 @@ IWAD_PATH = "missing_iwad.wad"
     std::cout << "ModuleRegistry Asset Resolution tests passed!" << std::endl << std::endl;
 }
 
+void test_engine_registry() {
+    std::cout << "--- Running EngineRegistry tests ---" << std::endl;
+
+    // 1. Capability matching
+    EngineInfo choco;
+    choco.name = "chocolate-doom";
+    choco.capabilities = {"vanilla"};
+
+    EngineInfo dsda;
+    dsda.name = "dsda-doom";
+    dsda.capabilities = {"vanilla", "limit-removing", "boom", "mbf", "mbf21", "complevel"};
+
+    EngineInfo gz;
+    gz.name = "gzdoom";
+    gz.capabilities = {"vanilla", "boom", "mbf21", "gzdoom", "pk3"};
+
+    assert(choco.supports_all({"vanilla"}));
+    assert(!choco.supports_all({"boom"}));
+    assert(!choco.supports_all({"gzdoom"}));
+
+    assert(dsda.supports_all({"vanilla"}));
+    assert(dsda.supports_all({"boom"}));
+    assert(dsda.supports_all({"mbf21"}));
+    assert(!dsda.supports_all({"gzdoom"}));
+
+    assert(gz.supports_all({"vanilla"}));
+    assert(gz.supports_all({"boom"}));
+    assert(gz.supports_all({"gzdoom"}));
+
+    // 2. Binary detection
+    assert(EngineRegistry::is_binary_available("sh"));
+    assert(!EngineRegistry::is_binary_available("nonexistent_binary_foo_bar_xyz"));
+
+    // 3. TOML loading and detection
+    {
+        std::ofstream f("test_engine_sample.toml");
+        f << R"(
+[sample-eng]
+type = "engine"
+title = "Sample Engine"
+binary = "sh"
+capabilities = ["vanilla", "boom", "sample_feature"]
+cmd = "{{BIN}} -iwad {{IWAD_PATH}}"
+)";
+    }
+
+    EngineRegistry reg;
+    assert(reg.load_engine_file("test_engine_sample.toml"));
+    assert(reg.has_engine("sample-eng"));
+
+    const EngineInfo* loaded_eng = reg.get_engine("sample-eng");
+    assert(loaded_eng != nullptr);
+    assert(loaded_eng->is_installed);
+    assert(!loaded_eng->installed_binary_path.empty());
+    assert(loaded_eng->has_capability("sample_feature"));
+
+    auto matched = reg.find_compatible_engines({"sample_feature"}, true);
+    assert(matched.size() == 1);
+    assert(matched[0].name == "sample-eng");
+
+    auto none_matched = reg.find_compatible_engines({"nonexistent_cap"}, true);
+    assert(none_matched.empty());
+
+    std::remove("test_engine_sample.toml");
+    std::cout << "EngineRegistry tests passed!" << std::endl << std::endl;
+}
+
+void test_dynamic_engine_fallback() {
+    std::cout << "--- Running Dynamic Engine Fallback tests ---" << std::endl;
+    namespace fs = std::filesystem;
+
+    fs::path temp_dir = "temp_dyn_assets";
+    fs::create_directories(temp_dir);
+
+    {
+        std::ofstream f(temp_dir / "DOOM2.WAD");
+        f << "IWAD";
+    }
+
+    {
+        std::ofstream f("test_dyn_engine.toml");
+        f << R"(
+[dyn-boom]
+type = "engine"
+title = "Dynamic Boom"
+binary = "sh"
+capabilities = ["vanilla", "boom"]
+cmd = "{{BIN}} -iwad {{IWAD_PATH}} -complevel {{COMPAT_LEVEL}}"
+)";
+    }
+
+    // Game has NO requires = ["..."], NO CMD template defined!
+    {
+        std::ofstream f("test_dyn_game.toml");
+        f << R"(
+[dyn_game]
+title = "Dynamic Decoupled Game"
+IWAD_PATH = "doom2.wad"
+COMPAT_LEVEL = 2
+requires_capability = ["vanilla"]
+)";
+    }
+
+    ModuleRegistry registry;
+    registry.get_asset_resolver().add_search_dir(temp_dir.string());
+
+    assert(registry.load_file("test_dyn_engine.toml"));
+    assert(registry.load_file("test_dyn_game.toml"));
+
+    std::vector<ResolvedMenuItem> items = registry.resolve_menu_items();
+    // Engine module should NOT be a menu item!
+    assert(items.size() == 1);
+
+    const auto& item = items[0];
+    assert(item.module_name == "dyn_game");
+    assert(item.assets_found);
+    assert(!item.compatible_engines.empty());
+    assert(item.compatible_engines[0].name == "dyn-boom");
+    // Verify CMD was dynamically generated from dyn-boom!
+    assert(!item.cmd.empty());
+    assert(item.cmd.find("-complevel 2") != std::string::npos);
+    std::cout << "Dynamically generated command: " << item.cmd << std::endl;
+
+    fs::remove_all(temp_dir);
+    std::remove("test_dyn_engine.toml");
+    std::remove("test_dyn_game.toml");
+
+    std::cout << "Dynamic Engine Fallback tests passed!" << std::endl << std::endl;
+}
+
 int main() {
     test_template_engine();
     test_module_registry();
     test_real_modules();
     test_asset_resolver();
     test_module_registry_asset_resolution();
+    test_engine_registry();
+    test_dynamic_engine_fallback();
     std::cout << "ALL TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;
 }

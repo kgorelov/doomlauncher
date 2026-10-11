@@ -89,10 +89,29 @@ void parse_single_module_table(const toml::table& tbl, Module& mod, const std::s
         }
     }
 
+    if (auto type_node = tbl.get("type")) {
+        if (auto s = type_node->as_string()) {
+            mod.type = std::string(s->get());
+        }
+    }
+
+    if (auto req_cap = tbl.get("requires_capability")) {
+        if (auto arr = req_cap->as_array()) {
+            for (const auto& elem : *arr) {
+                if (auto s = elem.as_string()) {
+                    mod.requires_capability.push_back(std::string(s->get()));
+                }
+            }
+        } else if (auto s = req_cap->as_string()) {
+            mod.requires_capability.push_back(std::string(s->get()));
+        }
+    }
+
     for (const auto& [key, val] : tbl) {
         std::string k_str(key.str());
         if (k_str == "name" || k_str == "title" || k_str == "is_menu_item" || k_str == "menu_item" ||
-            k_str == "requires" || k_str == "includes" || k_str == "vars" || k_str == "templates" || k_str == "modules") {
+            k_str == "requires" || k_str == "includes" || k_str == "vars" || k_str == "templates" || k_str == "modules" ||
+            k_str == "type" || k_str == "requires_capability") {
             continue;
         }
 
@@ -146,6 +165,18 @@ bool ModuleRegistry::load_user_config(const std::string& config_path) {
     return true;
 }
 
+void ModuleRegistry::set_engine_registry(const EngineRegistry& registry) {
+    engine_registry = registry;
+}
+
+EngineRegistry& ModuleRegistry::get_engine_registry() {
+    return engine_registry;
+}
+
+const EngineRegistry& ModuleRegistry::get_engine_registry() const {
+    return engine_registry;
+}
+
 void ModuleRegistry::add_module(const Module& module) {
     modules[module.name] = module;
 }
@@ -177,12 +208,52 @@ bool ModuleRegistry::load_file(const std::string& filepath) {
 
     std::vector<Module> loaded_modules_in_file;
 
+    auto maybe_register_engine = [&](const Module& mod) {
+        if (mod.type == "engine" || dir_path.find("engines") != std::string::npos) {
+            EngineInfo eng;
+            eng.name = mod.name;
+            eng.title = mod.title.empty() ? mod.name : mod.title;
+            if (mod.vars.find("binary") != mod.vars.end()) eng.binary = mod.vars.at("binary").to_string();
+            if (mod.vars.find("binaries") != mod.vars.end() && mod.vars.at("binaries").type == Value::Type::Array) {
+                for (const auto& b : mod.vars.at("binaries").arr_val) {
+                    eng.binaries.push_back(b.to_string());
+                }
+            }
+            if (mod.vars.find("capabilities") != mod.vars.end() && mod.vars.at("capabilities").type == Value::Type::Array) {
+                for (const auto& c : mod.vars.at("capabilities").arr_val) {
+                    eng.capabilities.push_back(c.to_string());
+                }
+            }
+            if (mod.vars.find("cmd") != mod.vars.end()) eng.cmd_template = mod.vars.at("cmd").to_string();
+            else if (mod.vars.find("CMD") != mod.vars.end()) eng.cmd_template = mod.vars.at("CMD").to_string();
+            eng.vars = mod.vars;
+
+            if (eng.binary.empty() && eng.binaries.empty()) {
+                std::string upper_name = eng.name;
+                std::transform(upper_name.begin(), upper_name.end(), upper_name.begin(), ::toupper);
+                std::string bin_var = upper_name + "_BIN";
+                if (eng.vars.find(bin_var) != eng.vars.end()) {
+                    eng.binary = eng.vars[bin_var].to_string();
+                } else if (eng.vars.find("BIN") != eng.vars.end()) {
+                    eng.binary = eng.vars["BIN"].to_string();
+                } else {
+                    eng.binary = eng.name;
+                }
+            }
+            if (eng.capabilities.empty()) {
+                eng.capabilities.push_back("vanilla");
+            }
+            engine_registry.register_engine(eng);
+        }
+    };
+
     for (const auto& [key, val] : root) {
         if (auto mod_tbl = val.as_table()) {
             Module mod;
             parse_single_module_table(*mod_tbl, mod, std::string(key.str()), dir_path);
             add_module(mod);
             loaded_modules_in_file.push_back(mod);
+            maybe_register_engine(mod);
         }
     }
 
@@ -191,6 +262,7 @@ bool ModuleRegistry::load_file(const std::string& filepath) {
         parse_single_module_table(root, mod, abs_p.stem().string(), dir_path);
         add_module(mod);
         loaded_modules_in_file.push_back(mod);
+        maybe_register_engine(mod);
     }
 
     for (const auto& mod : loaded_modules_in_file) {
@@ -266,7 +338,7 @@ std::vector<ResolvedMenuItem> ModuleRegistry::resolve_menu_items() {
     std::vector<ResolvedMenuItem> items;
 
     for (const auto& [name, mod] : modules) {
-        if (mod.title.empty()) {
+        if (mod.title.empty() || mod.type == "engine") {
             continue;
         }
 
@@ -423,6 +495,27 @@ std::vector<ResolvedMenuItem> ModuleRegistry::resolve_menu_items() {
 
         if (merged_scope.find("CMD") != merged_scope.end()) {
             item.cmd = merged_scope["CMD"].to_string();
+        }
+
+        // Engine matching and dynamic CMD generation
+        std::vector<std::string> req_caps = mod.requires_capability;
+        if (req_caps.empty()) {
+            req_caps.push_back("vanilla");
+        }
+        item.compatible_engines = engine_registry.find_compatible_engines(req_caps, true);
+
+        if (item.cmd.empty() && !item.compatible_engines.empty()) {
+            const auto& eng = item.compatible_engines[item.selected_engine_index];
+            Scope eng_scope = merged_scope;
+            std::string bin_path = eng.installed_binary_path.empty() ? eng.binary : eng.installed_binary_path;
+            eng_scope["BIN"] = Value(bin_path);
+            std::string upper_name = eng.name;
+            std::transform(upper_name.begin(), upper_name.end(), upper_name.begin(), ::toupper);
+            eng_scope[upper_name + "_BIN"] = Value(bin_path);
+
+            std::string rendered_cmd = TemplateEngine::render(eng.cmd_template, eng_scope);
+            item.cmd = rendered_cmd;
+            merged_scope["CMD"] = Value(rendered_cmd);
         }
 
         item.vars = merged_scope;

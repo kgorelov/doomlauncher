@@ -189,6 +189,103 @@ Value expand_value_module_dir(const Value& val, const std::string& module_dir) {
 
 } // namespace
 
+const EngineInfo* ResolvedMenuItem::get_selected_engine() const {
+    if (compatible_engines.empty()) {
+        return nullptr;
+    }
+    if (selected_engine_index >= compatible_engines.size()) {
+        return &compatible_engines[0];
+    }
+    return &compatible_engines[selected_engine_index];
+}
+
+std::string ResolvedMenuItem::get_command_for_engine(size_t engine_idx) const {
+    if (compatible_engines.empty()) {
+        return cmd;
+    }
+    if (engine_idx >= compatible_engines.size()) {
+        engine_idx = 0;
+    }
+    const auto& eng = compatible_engines[engine_idx];
+    if (eng.cmd_template.empty()) {
+        return cmd;
+    }
+
+    Scope eng_scope = vars;
+    std::string bin_path = eng.installed_binary_path.empty() ? eng.binary : eng.installed_binary_path;
+    eng_scope["BIN"] = Value(bin_path);
+    std::string upper_name = eng.name;
+    std::transform(upper_name.begin(), upper_name.end(), upper_name.begin(), ::toupper);
+    eng_scope[upper_name + "_BIN"] = Value(bin_path);
+
+    if (!resolved_iwad_path.empty()) {
+        eng_scope["IWAD_PATH"] = Value(resolved_iwad_path);
+        eng_scope["IWAD"] = Value(resolved_iwad_path);
+        eng_scope["iwad"] = Value(resolved_iwad_path);
+    }
+    if (!resolved_pwad_paths.empty()) {
+        Array pwads_arr;
+        for (const auto& p : resolved_pwad_paths) {
+            pwads_arr.push_back(Value(p));
+        }
+        eng_scope["PWADS"] = Value(pwads_arr);
+        eng_scope["pwads"] = Value(pwads_arr);
+    }
+
+    for (const auto& [k, v] : eng.vars) {
+        if (k == "BIN" || k == upper_name + "_BIN" || k == eng.name + "_BIN") {
+            continue;
+        }
+        if (eng_scope.find(k) == eng_scope.end()) {
+            eng_scope[k] = v;
+        }
+    }
+
+    std::string rendered = TemplateEngine::render(eng.cmd_template, eng_scope);
+    for (int p = 0; p < 2; ++p) {
+        std::string next = TemplateEngine::render(rendered, eng_scope);
+        if (next == rendered) break;
+        rendered = next;
+    }
+    return rendered;
+}
+
+std::string ResolvedMenuItem::get_command() const {
+    if (!compatible_engines.empty()) {
+        return get_command_for_engine(selected_engine_index);
+    }
+    return cmd;
+}
+
+bool ResolvedMenuItem::select_next_engine() {
+    if (compatible_engines.size() <= 1) {
+        return false;
+    }
+    selected_engine_index = (selected_engine_index + 1) % compatible_engines.size();
+    cmd = get_command();
+    return true;
+}
+
+bool ResolvedMenuItem::select_prev_engine() {
+    if (compatible_engines.size() <= 1) {
+        return false;
+    }
+    selected_engine_index = (selected_engine_index + compatible_engines.size() - 1) % compatible_engines.size();
+    cmd = get_command();
+    return true;
+}
+
+bool ResolvedMenuItem::select_engine(const std::string& engine_name) {
+    for (size_t i = 0; i < compatible_engines.size(); ++i) {
+        if (compatible_engines[i].name == engine_name) {
+            selected_engine_index = i;
+            cmd = get_command();
+            return true;
+        }
+    }
+    return false;
+}
+
 void ModuleRegistry::set_asset_resolver(const AssetResolver& resolver) {
     asset_resolver = resolver;
 }
@@ -202,9 +299,18 @@ const AssetResolver& ModuleRegistry::get_asset_resolver() const {
 }
 
 bool ModuleRegistry::load_user_config(const std::string& config_path) {
-    UserConfig cfg = AssetResolver::load_config(config_path);
-    asset_resolver = AssetResolver(cfg);
+    user_config = AssetResolver::load_config(config_path);
+    asset_resolver = AssetResolver(user_config);
     return true;
+}
+
+void ModuleRegistry::set_user_config(const UserConfig& config) {
+    user_config = config;
+    asset_resolver = AssetResolver(user_config);
+}
+
+const UserConfig& ModuleRegistry::get_user_config() const {
+    return user_config;
 }
 
 void ModuleRegistry::set_engine_registry(const EngineRegistry& registry) {
@@ -555,21 +661,39 @@ std::vector<ResolvedMenuItem> ModuleRegistry::resolve_menu_items() {
         }
         item.compatible_engines = engine_registry.find_compatible_engines(req_caps, true);
 
-        if (item.cmd.empty() && !item.compatible_engines.empty()) {
-            const auto& eng = item.compatible_engines[item.selected_engine_index];
-            Scope eng_scope = merged_scope;
-            std::string bin_path = eng.installed_binary_path.empty() ? eng.binary : eng.installed_binary_path;
-            eng_scope["BIN"] = Value(bin_path);
-            std::string upper_name = eng.name;
-            std::transform(upper_name.begin(), upper_name.end(), upper_name.begin(), ::toupper);
-            eng_scope[upper_name + "_BIN"] = Value(bin_path);
+        // Check if user has a default preferred engine that is compatible
+        if (!user_config.default_engine.empty() && !item.compatible_engines.empty()) {
+            for (size_t i = 0; i < item.compatible_engines.size(); ++i) {
+                if (item.compatible_engines[i].name == user_config.default_engine) {
+                    item.selected_engine_index = i;
+                    break;
+                }
+            }
+        }
 
-            std::string rendered_cmd = TemplateEngine::render(eng.cmd_template, eng_scope);
-            item.cmd = rendered_cmd;
-            merged_scope["CMD"] = Value(rendered_cmd);
+        // Determine GameStatus
+        if (!item.assets_found) {
+            item.status = GameStatus::MissingAssets;
+            if (!item.missing_assets.empty()) {
+                item.status_details = "Missing asset: " + item.missing_assets[0];
+            } else {
+                item.status_details = "Missing required game assets";
+            }
+        } else if (item.compatible_engines.empty() && item.cmd.empty()) {
+            item.status = GameStatus::NoCompatibleEngine;
+            item.status_details = "No compatible engine installed";
+        } else {
+            item.status = GameStatus::Ready;
+            item.status_details.clear();
         }
 
         item.vars = merged_scope;
+
+        if (item.cmd.empty() && !item.compatible_engines.empty()) {
+            item.cmd = item.get_command();
+            item.vars["CMD"] = Value(item.cmd);
+        }
+
         items.push_back(item);
     }
 

@@ -48,8 +48,14 @@ void Menu::launchSelected() {
     if (selectedItem < 0 || selectedItem >= static_cast<int>(menuItems.size())) return;
 
     const auto& item = menuItems[selectedItem];
-    if (!item.assets_found) {
-        statusMessage = "Cannot launch: missing asset (" + (item.missing_assets.empty() ? "unknown" : item.missing_assets[0]) + ")";
+    if (item.status == doomlauncher::GameStatus::MissingAssets || !item.assets_found) {
+        statusMessage = "Cannot launch: " + (!item.status_details.empty() ? item.status_details : "missing asset");
+        std::cout << statusMessage << std::endl;
+        return;
+    }
+
+    if (item.status == doomlauncher::GameStatus::NoCompatibleEngine) {
+        statusMessage = "Cannot launch: " + (!item.status_details.empty() ? item.status_details : "no compatible engine");
         std::cout << statusMessage << std::endl;
         return;
     }
@@ -86,8 +92,9 @@ void Menu::render() {
     for (size_t i = 0; i < menuItems.size(); ++i) {
         const auto& item = menuItems[i];
         bool isSelected = (static_cast<int>(i) == selectedItem);
+        bool isPlayable = (item.status == doomlauncher::GameStatus::Ready && item.assets_found);
         SDL_Color color;
-        if (!item.assets_found) {
+        if (!isPlayable) {
             color = isSelected ? darkRed : gray;
         } else {
             color = isSelected ? red : white;
@@ -95,8 +102,10 @@ void Menu::render() {
 
         int y = startY + static_cast<int>(i) * fontHeight;
         std::string displayText = item.title;
-        if (!item.assets_found && !item.missing_assets.empty()) {
+        if (item.status == doomlauncher::GameStatus::MissingAssets || !item.assets_found) {
             displayText += " [Missing Asset]";
+        } else if (item.status == doomlauncher::GameStatus::NoCompatibleEngine) {
+            displayText += " [No Compatible Engine]";
         }
         renderText(font, displayText, 0, y, color, true);
     }
@@ -107,8 +116,10 @@ void Menu::render() {
         std::string preview;
         if (!statusMessage.empty()) {
             preview = statusMessage;
-        } else if (!item.assets_found && !item.missing_assets.empty()) {
-            preview = "Asset missing: " + item.missing_assets[0];
+        } else if (item.status == doomlauncher::GameStatus::MissingAssets || (!item.assets_found && !item.missing_assets.empty())) {
+            preview = !item.status_details.empty() ? item.status_details : "Asset missing: " + item.missing_assets[0];
+        } else if (item.status == doomlauncher::GameStatus::NoCompatibleEngine) {
+            preview = !item.status_details.empty() ? item.status_details : "No compatible engine installed";
         } else if (item.module_name == "quit") {
             preview = "Exit Doom Launcher";
         } else {

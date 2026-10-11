@@ -23,11 +23,20 @@ struct Module {
     Scope vars;
 };
 
+enum class GameStatus {
+    Ready,
+    MissingAssets,
+    NoCompatibleEngine
+};
+
 struct ResolvedMenuItem {
     std::string module_name;
     std::string title;
     std::string cmd;
     Scope vars;
+
+    GameStatus status = GameStatus::Ready;
+    std::string status_details;
 
     bool assets_found = true;
     std::vector<std::string> missing_assets;
@@ -36,6 +45,13 @@ struct ResolvedMenuItem {
 
     std::vector<EngineInfo> compatible_engines;
     size_t selected_engine_index = 0;
+
+    std::string get_command() const;
+    std::string get_command_for_engine(size_t engine_idx) const;
+    const EngineInfo* get_selected_engine() const;
+    bool select_next_engine();
+    bool select_prev_engine();
+    bool select_engine(const std::string& engine_name);
 };
 
 class ModuleRegistry {
@@ -54,6 +70,9 @@ public:
     EngineRegistry& get_engine_registry();
     const EngineRegistry& get_engine_registry() const;
 
+    void set_user_config(const UserConfig& config);
+    const UserConfig& get_user_config() const;
+
     void add_module(const Module& module);
     const Module* get_module(const std::string& name) const;
     bool has_module(const std::string& name) const;
@@ -64,6 +83,7 @@ private:
     std::unordered_map<std::string, Module> modules;
     AssetResolver asset_resolver;
     EngineRegistry engine_registry;
+    UserConfig user_config;
 
     void resolve_dependencies_recursive(
         const std::string& module_name,

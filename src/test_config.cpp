@@ -485,6 +485,125 @@ pwads = ["MOD.WAD"]
     std::cout << "Game Module Modern Schema tests passed!" << std::endl << std::endl;
 }
 
+void test_dynamic_menu_item_binding() {
+    std::cout << "--- Running Dynamic Menu Item Binding & Engine Options tests ---" << std::endl;
+    namespace fs = std::filesystem;
+
+    fs::path temp_dir = "temp_p4_assets";
+    fs::create_directories(temp_dir);
+    {
+        std::ofstream f(temp_dir / "DOOM2.WAD");
+        f << "IWAD";
+    }
+
+    // Two engines
+    {
+        std::ofstream f("test_p4_eng1.toml");
+        f << R"(
+[eng1]
+type = "engine"
+title = "Engine One"
+binary = "sh"
+capabilities = ["vanilla"]
+cmd = "{{BIN}} -iwad {{IWAD_PATH}} --engine1"
+)";
+    }
+
+    {
+        std::ofstream f("test_p4_eng2.toml");
+        f << R"(
+[eng2]
+type = "engine"
+title = "Engine Two"
+binary = "sh"
+capabilities = ["vanilla", "advanced"]
+cmd = "{{BIN}} -iwad {{IWAD_PATH}} --engine2"
+)";
+    }
+
+    // Three games: Ready, MissingAssets, and NoCompatibleEngine
+    {
+        std::ofstream f("test_p4_games.toml");
+        f << R"(
+[ready_game]
+title = "Ready Game"
+iwad = "DOOM2.WAD"
+requires_capability = ["vanilla"]
+
+[missing_game]
+title = "Missing Asset Game"
+iwad = "NONEXISTENT.WAD"
+requires_capability = ["vanilla"]
+
+[incompat_game]
+title = "Incompatible Game"
+iwad = "DOOM2.WAD"
+requires_capability = ["quantum_feature"]
+)";
+    }
+
+    ModuleRegistry registry;
+    registry.get_asset_resolver().add_search_dir(temp_dir.string());
+
+    assert(registry.load_file("test_p4_eng1.toml"));
+    assert(registry.load_file("test_p4_eng2.toml"));
+    assert(registry.load_file("test_p4_games.toml"));
+
+    std::vector<ResolvedMenuItem> items = registry.resolve_menu_items();
+    assert(items.size() == 3);
+
+    for (auto& item : items) {
+        if (item.module_name == "ready_game") {
+            assert(item.status == GameStatus::Ready);
+            assert(item.compatible_engines.size() == 2);
+            assert(item.selected_engine_index == 0);
+            assert(item.cmd.find("--engine1") != std::string::npos);
+
+            // Test cycling to next engine
+            assert(item.select_next_engine());
+            assert(item.selected_engine_index == 1);
+            assert(item.cmd.find("--engine2") != std::string::npos);
+
+            // Test cycling to previous engine
+            assert(item.select_prev_engine());
+            assert(item.selected_engine_index == 0);
+            assert(item.cmd.find("--engine1") != std::string::npos);
+
+            // Test direct engine selection by name
+            assert(item.select_engine("eng2"));
+            assert(item.selected_engine_index == 1);
+            assert(item.cmd.find("--engine2") != std::string::npos);
+            assert(!item.select_engine("nonexistent_engine"));
+        } else if (item.module_name == "missing_game") {
+            assert(item.status == GameStatus::MissingAssets);
+            assert(!item.status_details.empty());
+        } else if (item.module_name == "incompat_game") {
+            assert(item.status == GameStatus::NoCompatibleEngine);
+            assert(!item.status_details.empty());
+        }
+    }
+
+    // Test UserConfig default_engine preference
+    UserConfig user_cfg;
+    user_cfg.default_engine = "eng2";
+    registry.set_user_config(user_cfg);
+    std::vector<ResolvedMenuItem> pref_items = registry.resolve_menu_items();
+    for (const auto& item : pref_items) {
+        if (item.module_name == "ready_game") {
+            assert(item.get_selected_engine() != nullptr);
+            assert(item.get_selected_engine()->name == "eng2");
+            assert(item.cmd.find("--engine2") != std::string::npos);
+        }
+    }
+
+    fs::remove_all(temp_dir);
+    std::remove("test_p4_eng1.toml");
+    std::remove("test_p4_eng2.toml");
+    std::remove("test_p4_games.toml");
+
+    std::cout << "Dynamic Menu Item Binding & Engine Options tests passed!" << std::endl << std::endl;
+}
+
 int main() {
     test_template_engine();
     test_module_registry();
@@ -494,6 +613,7 @@ int main() {
     test_engine_registry();
     test_dynamic_engine_fallback();
     test_game_module_modern_schema();
+    test_dynamic_menu_item_binding();
     std::cout << "ALL TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;
 }

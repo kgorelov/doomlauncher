@@ -1,5 +1,6 @@
 #include "config_module.h"
 #include "template_engine.h"
+#include <algorithm>
 #include <cassert>
 #include <filesystem>
 #include <fstream>
@@ -604,6 +605,395 @@ requires_capability = ["quantum_feature"]
     std::cout << "Dynamic Menu Item Binding & Engine Options tests passed!" << std::endl << std::endl;
 }
 
+void test_phase6_asset_resolver() {
+    std::cout << "--- Running Phase 6 AssetResolver Advanced Tests ---" << std::endl;
+    namespace fs = std::filesystem;
+
+    fs::path dir_a = "temp_p6_assets_a";
+    fs::path dir_b = "temp_p6_assets_b";
+    fs::path dir_c = "temp_p6_assets_c";
+
+    fs::create_directories(dir_a);
+    fs::create_directories(dir_b);
+    fs::create_directories(dir_c / "sub");
+
+    // 1. Finding files across multiple mock directories
+    {
+        std::ofstream f(dir_a / "P6_DOOM1.WAD");
+        f << "IWAD_DOOM1";
+    }
+    {
+        std::ofstream f(dir_a / "P6_CONFLICT.WAD");
+        f << "DIR_A_VERSION";
+    }
+
+    {
+        std::ofstream f(dir_b / "P6_DOOM2.WAD");
+        f << "IWAD_DOOM2";
+    }
+    {
+        std::ofstream f(dir_b / "P6_CONFLICT.WAD");
+        f << "DIR_B_VERSION";
+    }
+
+    {
+        std::ofstream f(dir_c / "P6_TNT.WAD");
+        f << "IWAD_TNT";
+    }
+    {
+        std::ofstream f(dir_c / "sub" / "P6_PLUTONIA.WAD");
+        f << "IWAD_PLUTONIA";
+    }
+
+    // Files specifically for case-insensitivity tests
+    {
+        std::ofstream f(dir_a / "p6_nerve.wad");
+        f << "NERVE";
+    }
+    {
+        std::ofstream f(dir_b / "P6_MASTERLEVELS.WAD");
+        f << "MASTER";
+    }
+    {
+        std::ofstream f(dir_c / "P6_Sigil_II.wad");
+        f << "SIGIL2";
+    }
+
+    AssetResolver resolver;
+    // Add multiple mock directories in priority order: dir_a, dir_b, dir_c
+    resolver.add_search_dir(dir_a.string());
+    resolver.add_search_dir(dir_b.string());
+    resolver.add_search_dir(dir_c.string());
+
+    // Verify finding files across multiple directories
+    std::string res_doom1 = resolver.resolve("p6_doom1.wad");
+    assert(!res_doom1.empty());
+    assert(fs::path(res_doom1).filename().string() == "P6_DOOM1.WAD");
+    assert(res_doom1.find("temp_p6_assets_a") != std::string::npos);
+
+    std::string res_doom2 = resolver.resolve("p6_doom2.wad");
+    assert(!res_doom2.empty());
+    assert(fs::path(res_doom2).filename().string() == "P6_DOOM2.WAD");
+    assert(res_doom2.find("temp_p6_assets_b") != std::string::npos);
+
+    std::string res_tnt = resolver.resolve("p6_tnt.wad");
+    assert(!res_tnt.empty());
+    assert(fs::path(res_tnt).filename().string() == "P6_TNT.WAD");
+    assert(res_tnt.find("temp_p6_assets_c") != std::string::npos);
+
+    // Verify resolving nested file in subdirectory
+    std::string res_plut = resolver.resolve("p6_plutonia.wad");
+    assert(!res_plut.empty());
+    assert(fs::path(res_plut).filename().string() == "P6_PLUTONIA.WAD");
+    assert(res_plut.find("temp_p6_assets_c/sub") != std::string::npos);
+
+    // Verify directory precedence: P6_CONFLICT.WAD in dir_a must be preferred over dir_b
+    std::string res_conflict = resolver.resolve("p6_conflict.wad");
+    assert(!res_conflict.empty());
+    assert(res_conflict.find("temp_p6_assets_a") != std::string::npos);
+    {
+        std::ifstream f(res_conflict);
+        std::string content;
+        f >> content;
+        assert(content == "DIR_A_VERSION");
+    }
+
+    // 2. Case-insensitivity verification
+    assert(!resolver.resolve("P6_NERVE.WAD").empty());
+    assert(!resolver.resolve("P6_Nerve.Wad").empty());
+    assert(!resolver.resolve("p6_nerve.wad").empty());
+    assert(fs::path(resolver.resolve("P6_NERVE.WAD")).filename().string() == "p6_nerve.wad");
+
+    assert(!resolver.resolve("p6_masterlevels.wad").empty());
+    assert(!resolver.resolve("P6_MasterLevels.wad").empty());
+    assert(!resolver.resolve("P6_MASTERLEVELS.WAD").empty());
+    assert(fs::path(resolver.resolve("p6_masterlevels.wad")).filename().string() == "P6_MASTERLEVELS.WAD");
+
+    assert(!resolver.resolve("p6_sigil_ii.wad").empty());
+    assert(!resolver.resolve("P6_SIGIL_II.WAD").empty());
+    assert(!resolver.resolve("p6_sIgIl_Ii.WaD").empty());
+    assert(fs::path(resolver.resolve("P6_SIGIL_II.WAD")).filename().string() == "P6_Sigil_II.wad");
+
+    assert(AssetResolver::iequals("DOOM2.WAD", "doom2.wad"));
+    assert(AssetResolver::iequals("Doom2.Wad", "DOOM2.WAD"));
+    assert(AssetResolver::iequals("nerve.wad", "NERVE.WAD"));
+    assert(!AssetResolver::iequals("DOOM2.WAD", "DOOM1.WAD"));
+
+    // 3. Reporting missing files gracefully without throwing
+    try {
+        std::string missing = resolver.resolve("definitely_nonexistent_99999.wad");
+        assert(missing.empty());
+
+        std::string empty_query = resolver.resolve("");
+        assert(empty_query.empty());
+
+        std::string non_dir_search = AssetResolver::find_file_in_dir("nonexistent_mock_folder_xyz_987", "file.wad");
+        assert(non_dir_search.empty());
+    } catch (...) {
+        assert(false && "AssetResolver threw an exception on missing or invalid queries!");
+    }
+
+    fs::remove_all(dir_a);
+    fs::remove_all(dir_b);
+    fs::remove_all(dir_c);
+
+    std::cout << "Phase 6 AssetResolver Advanced Tests passed!" << std::endl << std::endl;
+}
+
+void test_phase6_engine_capability_matching() {
+    std::cout << "--- Running Phase 6 Engine Capability Matching Tests ---" << std::endl;
+
+    EngineRegistry reg;
+
+    // Simulate 4 engines installed on system, plus 1 uninstalled engine
+    EngineInfo choco;
+    choco.name = "chocolate-doom";
+    choco.title = "Chocolate Doom";
+    choco.binary = "chocolate-doom";
+    choco.capabilities = {"vanilla"};
+    choco.is_installed = true;
+    choco.installed_binary_path = "/usr/bin/chocolate-doom";
+    reg.register_engine(choco);
+
+    EngineInfo boom;
+    boom.name = "prboom-plus";
+    boom.title = "PrBoom+";
+    boom.binary = "prboom-plus";
+    boom.capabilities = {"vanilla", "limit-removing", "boom", "complevel"};
+    boom.is_installed = true;
+    boom.installed_binary_path = "/usr/bin/prboom-plus";
+    reg.register_engine(boom);
+
+    EngineInfo dsda;
+    dsda.name = "dsda-doom";
+    dsda.title = "DSDA-Doom";
+    dsda.binary = "dsda-doom";
+    dsda.capabilities = {"vanilla", "limit-removing", "boom", "mbf", "mbf21", "complevel"};
+    dsda.is_installed = true;
+    dsda.installed_binary_path = "/usr/bin/dsda-doom";
+    reg.register_engine(dsda);
+
+    EngineInfo gz;
+    gz.name = "gzdoom";
+    gz.title = "GZDoom";
+    gz.binary = "gzdoom";
+    gz.capabilities = {"vanilla", "limit-removing", "boom", "mbf", "mbf21", "gzdoom", "pk3", "udmf"};
+    gz.is_installed = true;
+    gz.installed_binary_path = "/usr/bin/gzdoom";
+    reg.register_engine(gz);
+
+    // Uninstalled engine with mbf21 capability
+    EngineInfo woof;
+    woof.name = "woof";
+    woof.title = "Woof!";
+    woof.binary = "woof";
+    woof.capabilities = {"vanilla", "boom", "mbf", "mbf21"};
+    woof.is_installed = false;
+    woof.installed_binary_path = "";
+    reg.register_engine(woof);
+
+    auto has_engine_named = [](const std::vector<EngineInfo>& list, const std::string& name) {
+        return std::any_of(list.begin(), list.end(), [&](const EngineInfo& e) { return e.name == name; });
+    };
+
+    // 1. Matching 'vanilla' against simulated engine list (installed only)
+    // Ensures Chocolate, Boom, DSDA-Doom, and GZDoom match
+    auto vanilla_engines = reg.find_compatible_engines({"vanilla"}, true);
+    assert(vanilla_engines.size() == 4);
+    assert(has_engine_named(vanilla_engines, "chocolate-doom"));
+    assert(has_engine_named(vanilla_engines, "prboom-plus"));
+    assert(has_engine_named(vanilla_engines, "dsda-doom"));
+    assert(has_engine_named(vanilla_engines, "gzdoom"));
+    assert(!has_engine_named(vanilla_engines, "woof")); // uninstalled
+
+    // Matching 'vanilla' including uninstalled
+    auto all_vanilla = reg.find_compatible_engines({"vanilla"}, false);
+    assert(all_vanilla.size() == 5);
+    assert(has_engine_named(all_vanilla, "woof"));
+
+    // 2. Matching 'mbf21' against simulated engine list
+    // Ensures Chocolate and Boom are EXCLUDED, DSDA-Doom and GZDoom match
+    auto mbf21_engines = reg.find_compatible_engines({"mbf21"}, true);
+    assert(mbf21_engines.size() == 2);
+    assert(has_engine_named(mbf21_engines, "dsda-doom"));
+    assert(has_engine_named(mbf21_engines, "gzdoom"));
+    assert(!has_engine_named(mbf21_engines, "chocolate-doom"));
+    assert(!has_engine_named(mbf21_engines, "prboom-plus"));
+
+    // 3. Matching 'gzdoom' against simulated engine list
+    // Ensures ONLY GZDoom matches
+    auto gzdoom_engines = reg.find_compatible_engines({"gzdoom"}, true);
+    assert(gzdoom_engines.size() == 1);
+    assert(gzdoom_engines[0].name == "gzdoom");
+    assert(!has_engine_named(gzdoom_engines, "chocolate-doom"));
+    assert(!has_engine_named(gzdoom_engines, "prboom-plus"));
+    assert(!has_engine_named(gzdoom_engines, "dsda-doom"));
+
+    // 4. Combined capabilities & edge cases
+    auto complevel_engines = reg.find_compatible_engines({"vanilla", "complevel"}, true);
+    assert(complevel_engines.size() == 2);
+    assert(has_engine_named(complevel_engines, "prboom-plus"));
+    assert(has_engine_named(complevel_engines, "dsda-doom"));
+    assert(!has_engine_named(complevel_engines, "chocolate-doom"));
+    assert(!has_engine_named(complevel_engines, "gzdoom"));
+
+    // Case-insensitive capability matching
+    auto upper_mbf21 = reg.find_compatible_engines({"MBF21"}, true);
+    assert(upper_mbf21.size() == 2);
+    assert(has_engine_named(upper_mbf21, "dsda-doom"));
+    assert(has_engine_named(upper_mbf21, "gzdoom"));
+
+    // Unknown capability returns empty list without errors
+    auto unknown = reg.find_compatible_engines({"nonexistent_capability_123"}, true);
+    assert(unknown.empty());
+
+    std::cout << "Phase 6 Engine Capability Matching Tests passed!" << std::endl << std::endl;
+}
+
+void test_phase6_dynamic_template_generation() {
+    std::cout << "--- Running Phase 6 Dynamic Template Generation Tests ---" << std::endl;
+    namespace fs = std::filesystem;
+
+    fs::path temp_dir = "temp_p6_dyn_assets";
+    fs::create_directories(temp_dir);
+
+    {
+        std::ofstream f(temp_dir / "DOOM2.WAD");
+        f << "IWAD";
+    }
+    {
+        std::ofstream f(temp_dir / "SIGIL.WAD");
+        f << "PWAD";
+    }
+
+    // Engine 1: Boom - supports -complevel, -file, -save
+    {
+        std::ofstream f("test_p6_eng_boom.toml");
+        f << R"(
+[p6-boom]
+type = "engine"
+title = "Boom Engine"
+binary = "sh"
+capabilities = ["vanilla", "boom", "complevel"]
+cmd = "{{BIN}} -iwad {{IWAD_PATH}} {% if COMPAT_LEVEL %}-complevel {{COMPAT_LEVEL}}{% endif %}{% if PWADS %}{% for wad in PWADS %} -file {{wad}}{% endfor %}{% endif %}{% if SAVEDIR %} -save {{SAVEDIR}}{% endif %}"
+)";
+    }
+
+    // Engine 2: GZDoom - no complevel support, uses -file and -savedir
+    {
+        std::ofstream f("test_p6_eng_gzdoom.toml");
+        f << R"(
+[p6-gzdoom]
+type = "engine"
+title = "GZDoom Engine"
+binary = "sh"
+capabilities = ["vanilla", "boom", "gzdoom"]
+cmd = "{{BIN}} -iwad {{IWAD_PATH}}{% if PWADS %}{% for wad in PWADS %} -file {{wad}}{% endfor %}{% endif %}{% if SAVEDIR %} -savedir {{SAVEDIR}}{% endif %}"
+)";
+    }
+
+    // Engine 3: Chocolate Doom - no complevel support, uses -merge and -savedir
+    {
+        std::ofstream f("test_p6_eng_choco.toml");
+        f << R"(
+[p6-chocolate]
+type = "engine"
+title = "Chocolate Doom"
+binary = "sh"
+capabilities = ["vanilla"]
+cmd = "{{BIN}} -iwad {{IWAD_PATH}}{% if PWADS %}{% for wad in PWADS %} -merge {{wad}}{% endfor %}{% endif %}{% if SAVEDIR %} -savedir {{SAVEDIR}}{% endif %}"
+)";
+    }
+
+    // Game requiring 'vanilla' capability, compat_level 2, PWAD SIGIL.WAD, and savedir
+    {
+        std::ofstream f("test_p6_game.toml");
+        f << R"(
+[p6_game]
+type = "game"
+title = "Phase 6 Game"
+iwad = "DOOM2.WAD"
+pwads = ["SIGIL.WAD"]
+compat_level = 2
+savedir = "/tmp/doom_saves"
+requires_capability = ["vanilla"]
+)";
+    }
+
+    ModuleRegistry registry;
+    registry.get_asset_resolver().add_search_dir(temp_dir.string());
+
+    assert(registry.load_file("test_p6_eng_boom.toml"));
+    assert(registry.load_file("test_p6_eng_gzdoom.toml"));
+    assert(registry.load_file("test_p6_eng_choco.toml"));
+    assert(registry.load_file("test_p6_game.toml"));
+
+    std::vector<ResolvedMenuItem> items = registry.resolve_menu_items();
+    assert(items.size() == 1);
+
+    ResolvedMenuItem& item = items[0];
+    assert(item.module_name == "p6_game");
+    assert(item.status == GameStatus::Ready);
+    assert(item.assets_found);
+    assert(item.compatible_engines.size() == 3);
+
+    // 1. Select Boom engine: verify -complevel 2, -file, and -save are present
+    assert(item.select_engine("p6-boom"));
+    std::string boom_cmd = item.get_command();
+    std::cout << "Boom generated command: " << boom_cmd << std::endl;
+    assert(boom_cmd.find("-iwad") != std::string::npos);
+    assert(boom_cmd.find("-complevel 2") != std::string::npos);
+    assert(boom_cmd.find("-file") != std::string::npos);
+    assert(boom_cmd.find("SIGIL.WAD") != std::string::npos);
+    assert(boom_cmd.find("-save /tmp/doom_saves") != std::string::npos);
+    assert(boom_cmd.find("-savedir") == std::string::npos);
+    assert(boom_cmd.find("-merge") == std::string::npos);
+
+    // 2. Switch to GZDoom: verify -complevel is removed, -file remains, and -save changes to -savedir
+    assert(item.select_engine("p6-gzdoom"));
+    std::string gz_cmd = item.get_command();
+    std::cout << "GZDoom generated command: " << gz_cmd << std::endl;
+    assert(gz_cmd.find("-iwad") != std::string::npos);
+    assert(gz_cmd.find("-complevel") == std::string::npos);
+    assert(gz_cmd.find("-file") != std::string::npos);
+    assert(gz_cmd.find("SIGIL.WAD") != std::string::npos);
+    assert(gz_cmd.find("-savedir /tmp/doom_saves") != std::string::npos);
+    assert(gz_cmd.find(" -save ") == std::string::npos);
+    assert(gz_cmd.find("-merge") == std::string::npos);
+
+    // 3. Switch to Chocolate Doom: verify -file changes to -merge, no complevel
+    assert(item.select_engine("p6-chocolate"));
+    std::string choco_cmd = item.get_command();
+    std::cout << "Chocolate generated command: " << choco_cmd << std::endl;
+    assert(choco_cmd.find("-iwad") != std::string::npos);
+    assert(choco_cmd.find("-complevel") == std::string::npos);
+    assert(choco_cmd.find("-merge") != std::string::npos);
+    assert(choco_cmd.find("SIGIL.WAD") != std::string::npos);
+    assert(choco_cmd.find("-file") == std::string::npos);
+    assert(choco_cmd.find("-savedir /tmp/doom_saves") != std::string::npos);
+
+    // 4. Switch back to Boom: verify -complevel 2 is restored
+    assert(item.select_engine("p6-boom"));
+    assert(item.get_command().find("-complevel 2") != std::string::npos);
+
+    // 5. Test cycling through engines with select_next_engine() / select_prev_engine()
+    size_t initial_idx = item.selected_engine_index;
+    assert(item.select_next_engine());
+    assert(item.selected_engine_index == (initial_idx + 1) % 3);
+    assert(!item.cmd.empty());
+    assert(item.select_prev_engine());
+    assert(item.selected_engine_index == initial_idx);
+
+    // Clean up
+    fs::remove_all(temp_dir);
+    std::remove("test_p6_eng_boom.toml");
+    std::remove("test_p6_eng_gzdoom.toml");
+    std::remove("test_p6_eng_choco.toml");
+    std::remove("test_p6_game.toml");
+
+    std::cout << "Phase 6 Dynamic Template Generation Tests passed!" << std::endl << std::endl;
+}
+
 int main() {
     test_template_engine();
     test_module_registry();
@@ -614,6 +1004,9 @@ int main() {
     test_dynamic_engine_fallback();
     test_game_module_modern_schema();
     test_dynamic_menu_item_binding();
+    test_phase6_asset_resolver();
+    test_phase6_engine_capability_matching();
+    test_phase6_dynamic_template_generation();
     std::cout << "ALL TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;
 }

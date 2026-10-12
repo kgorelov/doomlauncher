@@ -117,27 +117,28 @@ bool EngineRegistry::is_binary_available(const std::string& binary_name) {
 void EngineRegistry::register_engine(const EngineInfo& engine) {
     EngineInfo eng = engine;
 
-    // Detect installation status
-    eng.is_installed = false;
-    eng.installed_binary_path.clear();
+    // Detect installation status if not already explicitly marked installed
+    if (!eng.is_installed) {
+        if (!eng.binaries.empty()) {
+            for (const auto& b : eng.binaries) {
+                std::string found = find_binary(b);
+                if (!found.empty()) {
+                    eng.is_installed = true;
+                    eng.installed_binary_path = found;
+                    break;
+                }
+            }
+        }
 
-    if (!eng.binaries.empty()) {
-        for (const auto& b : eng.binaries) {
-            std::string found = find_binary(b);
+        if (!eng.is_installed && !eng.binary.empty()) {
+            std::string found = find_binary(eng.binary);
             if (!found.empty()) {
                 eng.is_installed = true;
                 eng.installed_binary_path = found;
-                break;
             }
         }
-    }
-
-    if (!eng.is_installed && !eng.binary.empty()) {
-        std::string found = find_binary(eng.binary);
-        if (!found.empty()) {
-            eng.is_installed = true;
-            eng.installed_binary_path = found;
-        }
+    } else if (eng.installed_binary_path.empty()) {
+        eng.installed_binary_path = eng.binary;
     }
 
     auto it = engine_index_by_name.find(eng.name);

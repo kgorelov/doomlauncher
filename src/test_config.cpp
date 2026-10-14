@@ -1,4 +1,5 @@
 #include "config_module.h"
+#include "menu.h"
 #include "template_engine.h"
 #include <algorithm>
 #include <cassert>
@@ -994,6 +995,111 @@ requires_capability = ["vanilla"]
     std::cout << "Phase 6 Dynamic Template Generation Tests passed!" << std::endl << std::endl;
 }
 
+static void send_test_key(Menu& menu, SDL_Keycode sym) {
+    SDL_Event ev;
+    ev.type = SDL_KEYDOWN;
+    ev.key.keysym.sym = sym;
+    menu.handleEvent(ev);
+}
+
+void test_menu_paging() {
+    std::cout << "--- Running Menu Paging Tests ---" << std::endl;
+
+    Menu menu(nullptr, nullptr, nullptr, 800, 600);
+
+    // Create 15 items -> setMenuItems adds Quit -> 16 total items
+    std::vector<ResolvedMenuItem> items;
+    for (int i = 1; i <= 15; ++i) {
+        ResolvedMenuItem it;
+        it.title = "Test Game " + std::to_string(i);
+        it.module_name = "game_" + std::to_string(i);
+        items.push_back(it);
+    }
+    menu.setMenuItems(items);
+
+    assert(Menu::ITEMS_PER_PAGE == 7);
+    assert(menu.getTotalPages() == 3); // 16 items / 7 = 3 pages (7 + 7 + 2)
+    assert(menu.getCurrentPage() == 0);
+    assert(menu.getSelectedItem() == 0);
+
+    // 1. Test navigation with Down arrow across pages
+    for (int i = 0; i < 6; ++i) {
+        send_test_key(menu, SDLK_DOWN);
+    }
+    assert(menu.getSelectedItem() == 6);
+    assert(menu.getCurrentPage() == 0);
+
+    // 7th Down -> moves to index 7 (page 1)
+    send_test_key(menu, SDLK_DOWN);
+    assert(menu.getSelectedItem() == 7);
+    assert(menu.getCurrentPage() == 1);
+
+    // Down to end of page 1 (index 13)
+    for (int i = 0; i < 6; ++i) {
+        send_test_key(menu, SDLK_DOWN);
+    }
+    assert(menu.getSelectedItem() == 13);
+    assert(menu.getCurrentPage() == 1);
+
+    // Down to page 2 (index 14)
+    send_test_key(menu, SDLK_DOWN);
+    assert(menu.getSelectedItem() == 14);
+    assert(menu.getCurrentPage() == 2);
+
+    // Down to last item (index 15, Quit)
+    send_test_key(menu, SDLK_DOWN);
+    assert(menu.getSelectedItem() == 15);
+    assert(menu.getCurrentPage() == 2);
+
+    // Down from last item -> wraps to item 0 (page 0)
+    send_test_key(menu, SDLK_DOWN);
+    assert(menu.getSelectedItem() == 0);
+    assert(menu.getCurrentPage() == 0);
+
+    // 2. Test navigation with Up arrow across pages (wrapping backwards)
+    send_test_key(menu, SDLK_UP);
+    assert(menu.getSelectedItem() == 15);
+    assert(menu.getCurrentPage() == 2);
+
+    // Up from index 7 (start of page 1) -> moves to index 6 (end of page 0)
+    // First reset to index 7
+    for (int i = 0; i < 8; ++i) {
+        send_test_key(menu, SDLK_DOWN);
+    }
+    assert(menu.getSelectedItem() == 7);
+    assert(menu.getCurrentPage() == 1);
+    send_test_key(menu, SDLK_UP);
+    assert(menu.getSelectedItem() == 6);
+    assert(menu.getCurrentPage() == 0);
+
+    // 3. Test PageDown navigation
+    menu.setMenuItems(items); // cleanly reset to index 0
+    assert(menu.getSelectedItem() == 0);
+
+    send_test_key(menu, SDLK_PAGEDOWN); // page 0 -> page 1 (index 7)
+    assert(menu.getSelectedItem() == 7);
+    assert(menu.getCurrentPage() == 1);
+
+    send_test_key(menu, SDLK_PAGEDOWN); // page 1 -> page 2 (index 14)
+    assert(menu.getSelectedItem() == 14);
+    assert(menu.getCurrentPage() == 2);
+
+    send_test_key(menu, SDLK_PAGEDOWN); // on last page -> wraps to page 0
+    assert(menu.getCurrentPage() == 0);
+
+    // 4. Test PageUp navigation
+    send_test_key(menu, SDLK_PAGEUP); // on page 0 -> wraps to last page (page 2)
+    assert(menu.getCurrentPage() == 2);
+
+    send_test_key(menu, SDLK_PAGEUP); // page 2 -> page 1
+    assert(menu.getCurrentPage() == 1);
+
+    send_test_key(menu, SDLK_PAGEUP); // page 1 -> page 0
+    assert(menu.getCurrentPage() == 0);
+
+    std::cout << "Menu Paging Tests passed!" << std::endl << std::endl;
+}
+
 int main() {
     test_template_engine();
     test_module_registry();
@@ -1007,6 +1113,7 @@ int main() {
     test_phase6_asset_resolver();
     test_phase6_engine_capability_matching();
     test_phase6_dynamic_template_generation();
+    test_menu_paging();
     std::cout << "ALL TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;
 }

@@ -39,4 +39,7 @@ add_executable(test_config
     src/config_module.cpp
     src/asset_resolver.cpp
     src/engine_registry.cpp
+    src/menu.cpp
 )
+
+target_link_libraries(test_config PUBLIC ${SDL2_LIBRARY} ${SDL2_TTF_LIBRARY})

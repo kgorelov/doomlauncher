@@ -23,15 +23,56 @@ void Menu::setMenuItems(const std::vector<doomlauncher::ResolvedMenuItem>& items
 void Menu::handleEvent(const SDL_Event& event) {
     if (menuItems.empty()) return;
 
+    int totalItems = static_cast<int>(menuItems.size());
+    int totalPages = (totalItems + ITEMS_PER_PAGE - 1) / ITEMS_PER_PAGE;
+    if (totalPages < 1) totalPages = 1;
+    int currentPage = selectedItem / ITEMS_PER_PAGE;
+
     if (event.type == SDL_KEYDOWN) {
         switch (event.key.keysym.sym) {
             case SDLK_UP:
-                selectedItem = (selectedItem - 1 + static_cast<int>(menuItems.size())) % static_cast<int>(menuItems.size());
+                selectedItem = (selectedItem - 1 + totalItems) % totalItems;
                 statusMessage.clear();
                 break;
             case SDLK_DOWN:
-                selectedItem = (selectedItem + 1) % static_cast<int>(menuItems.size());
+                selectedItem = (selectedItem + 1) % totalItems;
                 statusMessage.clear();
+                break;
+            case SDLK_PAGEUP:
+                if (currentPage > 0) {
+                    selectedItem = std::max(0, selectedItem - ITEMS_PER_PAGE);
+                } else {
+                    int targetPage = totalPages - 1;
+                    int slot = selectedItem % ITEMS_PER_PAGE;
+                    int targetItem = targetPage * ITEMS_PER_PAGE + slot;
+                    if (targetItem >= totalItems) targetItem = totalItems - 1;
+                    selectedItem = targetItem;
+                }
+                statusMessage.clear();
+                break;
+            case SDLK_PAGEDOWN:
+                if (currentPage < totalPages - 1) {
+                    int targetItem = selectedItem + ITEMS_PER_PAGE;
+                    if (targetItem >= totalItems) targetItem = totalItems - 1;
+                    selectedItem = targetItem;
+                } else {
+                    selectedItem = selectedItem % ITEMS_PER_PAGE;
+                }
+                statusMessage.clear();
+                break;
+            case SDLK_LEFT:
+                if (selectedItem >= 0 && selectedItem < totalItems) {
+                    if (menuItems[selectedItem].select_prev_engine()) {
+                        statusMessage.clear();
+                    }
+                }
+                break;
+            case SDLK_RIGHT:
+                if (selectedItem >= 0 && selectedItem < totalItems) {
+                    if (menuItems[selectedItem].select_next_engine()) {
+                        statusMessage.clear();
+                    }
+                }
                 break;
             case SDLK_RETURN:
                 if (menuItems[selectedItem].module_name == "quit") {
@@ -60,16 +101,21 @@ void Menu::launchSelected() {
         return;
     }
 
-    if (item.cmd.empty()) {
+    std::string cmd = item.get_command();
+    if (cmd.empty()) {
+        cmd = item.cmd;
+    }
+
+    if (cmd.empty()) {
         statusMessage = "No CMD defined for " + item.title;
         std::cout << statusMessage << std::endl;
         return;
     }
 
-    statusMessage = "Launching: " + item.cmd;
+    statusMessage = "Launching: " + cmd;
     std::cout << statusMessage << std::endl;
 
-    int res = std::system(item.cmd.c_str());
+    int res = std::system(cmd.c_str());
     (void)res;
 }
 
@@ -85,13 +131,21 @@ void Menu::render() {
     SDL_Color gray = { 130, 130, 130, 255 };
     SDL_Color darkRed = { 180, 50, 50, 255 };
 
-    int fontHeight = TTF_FontHeight(font);
-    int totalMenuHeight = static_cast<int>(menuItems.size()) * fontHeight;
-    int startY = (screenHeight - totalMenuHeight) / 2;
+    int totalItems = static_cast<int>(menuItems.size());
+    int totalPages = (totalItems + ITEMS_PER_PAGE - 1) / ITEMS_PER_PAGE;
+    if (totalPages < 1) totalPages = 1;
+    int currentPage = selectedItem / ITEMS_PER_PAGE;
+    int pageStartIndex = currentPage * ITEMS_PER_PAGE;
+    int pageEndIndex = std::min(pageStartIndex + ITEMS_PER_PAGE, totalItems);
 
-    for (size_t i = 0; i < menuItems.size(); ++i) {
+    int fontHeight = TTF_FontHeight(font);
+    int totalMenuHeight = ITEMS_PER_PAGE * fontHeight;
+    int startY = (screenHeight - totalMenuHeight) / 2 - 25;
+    if (startY < 20) startY = 20;
+
+    for (int i = pageStartIndex; i < pageEndIndex; ++i) {
         const auto& item = menuItems[i];
-        bool isSelected = (static_cast<int>(i) == selectedItem);
+        bool isSelected = (i == selectedItem);
         bool isPlayable = (item.status == doomlauncher::GameStatus::Ready && item.assets_found);
         SDL_Color color;
         if (!isPlayable) {
@@ -100,18 +154,35 @@ void Menu::render() {
             color = isSelected ? red : white;
         }
 
-        int y = startY + static_cast<int>(i) * fontHeight;
+        int slotIndex = i - pageStartIndex;
+        int y = startY + slotIndex * fontHeight;
         std::string displayText = item.title;
         if (item.status == doomlauncher::GameStatus::MissingAssets || !item.assets_found) {
             displayText += " [Missing Asset]";
         } else if (item.status == doomlauncher::GameStatus::NoCompatibleEngine) {
             displayText += " [No Compatible Engine]";
+        } else if (item.module_name != "quit") {
+            const auto* eng = item.get_selected_engine();
+            if (eng) {
+                if (item.compatible_engines.size() > 1) {
+                    displayText += " < " + eng->title + " >";
+                } else {
+                    displayText += " [ " + eng->title + " ]";
+                }
+            }
         }
         renderText(font, displayText, 0, y, color, true);
     }
 
+    // Render page indicator under menu
+    if (smallFont) {
+        std::string pageIndicator = "[ Page " + std::to_string(currentPage + 1) + " of " + std::to_string(totalPages) + " ]";
+        int pageIndicatorY = startY + ITEMS_PER_PAGE * fontHeight + 8;
+        renderText(smallFont, pageIndicator, 0, pageIndicatorY, gray, true);
+    }
+
     // Render command preview / status message at bottom
-    if (selectedItem >= 0 && selectedItem < static_cast<int>(menuItems.size())) {
+    if (selectedItem >= 0 && selectedItem < totalItems) {
         const auto& item = menuItems[selectedItem];
         std::string preview;
         if (!statusMessage.empty()) {
@@ -123,7 +194,12 @@ void Menu::render() {
         } else if (item.module_name == "quit") {
             preview = "Exit Doom Launcher";
         } else {
-            preview = "CMD: " + item.cmd;
+            std::string cmd = item.get_command();
+            if (cmd.empty()) cmd = item.cmd;
+            preview = "CMD: " + cmd;
+            if (item.compatible_engines.size() > 1) {
+                preview += "  (Left/Right to switch engine)";
+            }
         }
 
         if (smallFont) {

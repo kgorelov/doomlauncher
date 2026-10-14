@@ -9,6 +9,8 @@
 
 class Menu {
 public:
+    static constexpr int ITEMS_PER_PAGE = 7;
+
     Menu(SDL_Renderer* renderer, TTF_Font* font, TTF_Font* smallFont, int screenWidth, int screenHeight);
     ~Menu();
 
@@ -17,6 +19,12 @@ public:
     void update();
     void render();
     bool isQuitSelected() const;
+
+    int getSelectedItem() const { return selectedItem; }
+    int getCurrentPage() const { return selectedItem / ITEMS_PER_PAGE; }
+    int getTotalPages() const {
+        return menuItems.empty() ? 1 : static_cast<int>((menuItems.size() + ITEMS_PER_PAGE - 1) / ITEMS_PER_PAGE);
+    }
 
 private:
     SDL_Renderer* renderer;

@@ -229,6 +229,11 @@ UserConfig AssetResolver::load_config(const std::string& explicit_path) {
                 config.default_engine = std::string(str->get());
             }
         }
+        if (auto node = prefs_tbl->get("osd_font")) {
+            if (auto str = node->as_string()) {
+                config.osd_font = std::string(str->get());
+            }
+        }
     }
 
     if (auto iwads_tbl = tbl.get_as<toml::table>("iwads")) {

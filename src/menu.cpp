@@ -2,11 +2,18 @@
 #include <cstdlib>
 #include <iostream>
 
-Menu::Menu(SDL_Renderer* renderer, TTF_Font* font, TTF_Font* smallFont, int screenWidth, int screenHeight)
-    : renderer(renderer), font(font), smallFont(smallFont), screenWidth(screenWidth), screenHeight(screenHeight), selectedItem(0), quitSelected(false) {
+Menu::Menu(SDL_Renderer* renderer, TTF_Font* font, TTF_Font* smallFont, int screenWidth, int screenHeight, TTF_Font* altSmallFont)
+    : renderer(renderer), font(font), smallFont(smallFont), altSmallFont(altSmallFont), useAlternateFont(false),
+      screenWidth(screenWidth), screenHeight(screenHeight), selectedItem(0), quitSelected(false) {
 }
 
 Menu::~Menu() {
+}
+
+void Menu::toggleOsdFont() {
+    useAlternateFont = !useAlternateFont;
+    statusMessage = useAlternateFont ? "[ OSD Font: Classic Doom HUD (STCFN) - Press F9 to toggle ]"
+                                     : "[ OSD Font: Clean Monospace (Hack) - Press F9 to toggle ]";
 }
 
 void Menu::setMenuItems(const std::vector<doomlauncher::ResolvedMenuItem>& items) {
@@ -81,6 +88,11 @@ void Menu::handleEvent(const SDL_Event& event) {
                     launchSelected();
                 }
                 break;
+            case SDLK_F9:
+                if (altSmallFont) {
+                    toggleOsdFont();
+                }
+                break;
         }
     }
 }
@@ -139,7 +151,8 @@ void Menu::render() {
     int pageStartIndex = currentPage * ITEMS_PER_PAGE;
     int pageEndIndex = std::min(pageStartIndex + ITEMS_PER_PAGE, totalItems);
 
-    int smallFontHeight = smallFont ? TTF_FontHeight(smallFont) : 24;
+    TTF_Font* activeSmallFont = (useAlternateFont && altSmallFont) ? altSmallFont : smallFont;
+    int smallFontHeight = activeSmallFont ? TTF_FontHeight(activeSmallFont) : 24;
     int lineSpacing = smallFontHeight + 4;
     int osdStartY = screenHeight - (5 * lineSpacing + 12);
     int osdX = 30;
@@ -174,19 +187,20 @@ void Menu::render() {
     }
 
     // Render page indicator under menu
-    if (smallFont) {
+    if (activeSmallFont) {
         std::string pageIndicator = "[ Page " + std::to_string(currentPage + 1) + " of " + std::to_string(totalPages) + " ]";
         int pageIndicatorY = startY + (ITEMS_PER_PAGE - 1) * itemSpacing + fontHeight + 8;
         if (pageIndicatorY + smallFontHeight >= osdStartY) {
             pageIndicatorY = osdStartY - smallFontHeight - 4;
         }
-        renderText(smallFont, pageIndicator, 0, pageIndicatorY, gray, true);
+        renderText(activeSmallFont, pageIndicator, 0, pageIndicatorY, gray, true);
     }
 
     // Render OSD / HUD Block at bottom left
-    if (smallFont && selectedItem >= 0 && selectedItem < totalItems) {
+    if (activeSmallFont && selectedItem >= 0 && selectedItem < totalItems) {
         const auto& item = menuItems[selectedItem];
 
+        std::string fontHint = altSmallFont ? "F9: Font | " : "";
         std::string line1;
         SDL_Color line1Color = yellow;
 
@@ -201,7 +215,7 @@ void Menu::render() {
             line1Color = yellow;
             line2 = "Press Enter or F10 to exit";
             line2Color = gray;
-            line3 = "F1: Help | Enter: Exit | F10: Fast Quit";
+            line3 = "F1: Help | " + fontHint + "Enter: Exit | F10: Fast Quit";
         } else if (item.status == doomlauncher::GameStatus::MissingAssets || (!item.assets_found && !item.missing_assets.empty())) {
             line1 = "STATUS: Cannot launch - missing asset";
             if (!item.missing_assets.empty()) {
@@ -212,7 +226,7 @@ void Menu::render() {
             line1Color = red;
             line2 = "CMD: [Disabled - missing assets]";
             line2Color = gray;
-            line3 = "F1: Help | F2: Save | F3: Info | F4: Engine | F10: Quit";
+            line3 = "F1: Help | F2: Save | F3: Info | F4: Engine | " + fontHint + "F10: Quit";
         } else if (item.status == doomlauncher::GameStatus::NoCompatibleEngine) {
             line1 = "STATUS: Cannot launch - no compatible engine installed";
             if (!item.status_details.empty()) {
@@ -221,7 +235,7 @@ void Menu::render() {
             line1Color = red;
             line2 = "CMD: [Disabled - no compatible engine]";
             line2Color = gray;
-            line3 = "F1: Help | F2: Save | F3: Info | F4: Engine | F10: Quit";
+            line3 = "F1: Help | F2: Save | F3: Info | F4: Engine | " + fontHint + "F10: Quit";
         } else {
             const auto* eng = item.get_selected_engine();
             std::string engTitle = eng ? eng->title : "Unknown";
@@ -238,7 +252,7 @@ void Menu::render() {
             line2 = "CMD: " + cmd;
             line2Color = white;
 
-            line3 = "F1: Help | F2: Save | F3: Info | F4: Engine | F10: Quit";
+            line3 = "F1: Help | F2: Save | F3: Info | F4: Engine | " + fontHint + "F10: Quit";
         }
 
         if (!statusMessage.empty()) {
@@ -246,9 +260,9 @@ void Menu::render() {
             line3Color = (statusMessage.find("Saved") != std::string::npos || statusMessage.find("saved") != std::string::npos) ? green : yellow;
         }
 
-        renderText(smallFont, line1, osdX, osdStartY, line1Color, false);
-        renderText(smallFont, line2, osdX, osdStartY + lineSpacing, line2Color, false);
-        renderText(smallFont, line3, osdX, osdStartY + 2 * lineSpacing, line3Color, false);
+        renderText(activeSmallFont, line1, osdX, osdStartY, line1Color, false);
+        renderText(activeSmallFont, line2, osdX, osdStartY + lineSpacing, line2Color, false);
+        renderText(activeSmallFont, line3, osdX, osdStartY + 2 * lineSpacing, line3Color, false);
     }
 }
 

@@ -1149,6 +1149,18 @@ void test_menu_osd() {
     send_test_key(menu, SDLK_LEFT);
     assert(menu.getMenuItems()[0].get_selected_engine()->name == "boom");
 
+    // Test font toggling with alternate font (F9)
+    TTF_Font* dummyAlt = reinterpret_cast<TTF_Font*>(0x1234);
+    Menu menuWithAlt(nullptr, nullptr, nullptr, 800, 600, dummyAlt);
+    menuWithAlt.setMenuItems(items);
+    assert(!menuWithAlt.isUsingAlternateFont());
+    send_test_key(menuWithAlt, SDLK_F9);
+    assert(menuWithAlt.isUsingAlternateFont());
+    assert(menuWithAlt.getStatusMessage().find("Classic Doom") != std::string::npos);
+    send_test_key(menuWithAlt, SDLK_F9);
+    assert(!menuWithAlt.isUsingAlternateFont());
+    assert(menuWithAlt.getStatusMessage().find("Monospace") != std::string::npos);
+
     // Ensure safe call to update/render with null fonts doesn't crash
     menu.update();
     menu.render();

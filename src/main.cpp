@@ -97,11 +97,20 @@ int main(int argc, char* argv[]) {
         font = TTF_OpenFont("fonts/Doom2016Left-RpJDA.ttf", 84);
     }
 
-    SDL_RWops* rw2 = SDL_RWFromConstMem(fonts_Doom2016Text_GOlBq_ttf, fonts_Doom2016Text_GOlBq_ttf_len);
-    TTF_Font* smallFont = TTF_OpenFontRW(rw2, 1, 24);
-    if (!smallFont && fs::exists("fonts/Doom2016Text-GOlBq.ttf")) {
-        smallFont = TTF_OpenFont("fonts/Doom2016Text-GOlBq.ttf", 24);
+    SDL_RWops* rwHud = SDL_RWFromConstMem(fonts_DoomClassicHUD_ttf, fonts_DoomClassicHUD_ttf_len);
+    TTF_Font* hudFont = TTF_OpenFontRW(rwHud, 1, 20);
+    if (!hudFont && fs::exists("fonts/DoomClassicHUD.ttf")) {
+        hudFont = TTF_OpenFont("fonts/DoomClassicHUD.ttf", 20);
     }
+
+    SDL_RWops* rwMono = SDL_RWFromConstMem(fonts_Hack_Regular_ttf, fonts_Hack_Regular_ttf_len);
+    TTF_Font* monoFont = TTF_OpenFontRW(rwMono, 1, 20);
+    if (!monoFont && fs::exists("fonts/Hack-Regular.ttf")) {
+        monoFont = TTF_OpenFont("fonts/Hack-Regular.ttf", 20);
+    }
+
+    TTF_Font* smallFont = monoFont ? monoFont : hudFont;
+    TTF_Font* altSmallFont = (monoFont && hudFont) ? hudFont : nullptr;
 
     if (font == nullptr || smallFont == nullptr) {
         std::cerr << "Failed to load font! SDL_ttf Error: " << TTF_GetError() << std::endl;
@@ -155,7 +164,10 @@ int main(int argc, char* argv[]) {
     std::vector<doomlauncher::ResolvedMenuItem> resolvedItems = registry.resolve_menu_items();
     std::cout << "Resolved " << resolvedItems.size() << " menu item(s) from config." << std::endl;
 
-    Menu menu(renderer, font, smallFont, screenWidth, screenHeight);
+    Menu menu(renderer, font, smallFont, screenWidth, screenHeight, altSmallFont);
+    if (registry.get_user_config().osd_font == "doom" || registry.get_user_config().osd_font == "classic") {
+        menu.setUseAlternateFont(true);
+    }
     menu.setMenuItems(resolvedItems);
 
     bool quit = false;
@@ -195,7 +207,8 @@ int main(int argc, char* argv[]) {
     }
 
     if (font) TTF_CloseFont(font);
-    if (smallFont) TTF_CloseFont(smallFont);
+    if (hudFont) TTF_CloseFont(hudFont);
+    if (monoFont && monoFont != hudFont) TTF_CloseFont(monoFont);
 
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);

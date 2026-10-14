@@ -9,7 +9,7 @@
 
 class Menu {
 public:
-    static constexpr int ITEMS_PER_PAGE = 7;
+    static constexpr int ITEMS_PER_PAGE = 6;
 
     Menu(SDL_Renderer* renderer, TTF_Font* font, TTF_Font* smallFont, int screenWidth, int screenHeight);
     ~Menu();

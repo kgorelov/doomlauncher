@@ -1017,37 +1017,39 @@ void test_menu_paging() {
     }
     menu.setMenuItems(items);
 
-    assert(Menu::ITEMS_PER_PAGE == 7);
-    assert(menu.getTotalPages() == 3); // 16 items / 7 = 3 pages (7 + 7 + 2)
+    assert(Menu::ITEMS_PER_PAGE == 6);
+    assert(menu.getTotalPages() == 3); // 16 items / 6 = 3 pages (6 + 6 + 4)
     assert(menu.getCurrentPage() == 0);
     assert(menu.getSelectedItem() == 0);
 
     // 1. Test navigation with Down arrow across pages
-    for (int i = 0; i < 6; ++i) {
+    for (int i = 0; i < 5; ++i) {
         send_test_key(menu, SDLK_DOWN);
     }
-    assert(menu.getSelectedItem() == 6);
+    assert(menu.getSelectedItem() == 5);
     assert(menu.getCurrentPage() == 0);
 
-    // 7th Down -> moves to index 7 (page 1)
+    // 6th Down -> moves to index 6 (page 1)
     send_test_key(menu, SDLK_DOWN);
-    assert(menu.getSelectedItem() == 7);
+    assert(menu.getSelectedItem() == 6);
     assert(menu.getCurrentPage() == 1);
 
-    // Down to end of page 1 (index 13)
-    for (int i = 0; i < 6; ++i) {
+    // Down to end of page 1 (index 11)
+    for (int i = 0; i < 5; ++i) {
         send_test_key(menu, SDLK_DOWN);
     }
-    assert(menu.getSelectedItem() == 13);
+    assert(menu.getSelectedItem() == 11);
     assert(menu.getCurrentPage() == 1);
 
-    // Down to page 2 (index 14)
+    // Down to page 2 (index 12)
     send_test_key(menu, SDLK_DOWN);
-    assert(menu.getSelectedItem() == 14);
+    assert(menu.getSelectedItem() == 12);
     assert(menu.getCurrentPage() == 2);
 
     // Down to last item (index 15, Quit)
-    send_test_key(menu, SDLK_DOWN);
+    for (int i = 0; i < 3; ++i) {
+        send_test_key(menu, SDLK_DOWN);
+    }
     assert(menu.getSelectedItem() == 15);
     assert(menu.getCurrentPage() == 2);
 
@@ -1061,40 +1063,44 @@ void test_menu_paging() {
     assert(menu.getSelectedItem() == 15);
     assert(menu.getCurrentPage() == 2);
 
-    // Up from index 7 (start of page 1) -> moves to index 6 (end of page 0)
-    // First reset to index 7
-    for (int i = 0; i < 8; ++i) {
+    // Up from index 6 (start of page 1) -> moves to index 5 (end of page 0)
+    menu.setMenuItems(items); // reset to index 0
+    for (int i = 0; i < 6; ++i) {
         send_test_key(menu, SDLK_DOWN);
     }
-    assert(menu.getSelectedItem() == 7);
+    assert(menu.getSelectedItem() == 6);
     assert(menu.getCurrentPage() == 1);
     send_test_key(menu, SDLK_UP);
-    assert(menu.getSelectedItem() == 6);
+    assert(menu.getSelectedItem() == 5);
     assert(menu.getCurrentPage() == 0);
 
     // 3. Test PageDown navigation
     menu.setMenuItems(items); // cleanly reset to index 0
     assert(menu.getSelectedItem() == 0);
 
-    send_test_key(menu, SDLK_PAGEDOWN); // page 0 -> page 1 (index 7)
-    assert(menu.getSelectedItem() == 7);
+    send_test_key(menu, SDLK_PAGEDOWN); // page 0 -> page 1 (index 6)
+    assert(menu.getSelectedItem() == 6);
     assert(menu.getCurrentPage() == 1);
 
-    send_test_key(menu, SDLK_PAGEDOWN); // page 1 -> page 2 (index 14)
-    assert(menu.getSelectedItem() == 14);
+    send_test_key(menu, SDLK_PAGEDOWN); // page 1 -> page 2 (index 12)
+    assert(menu.getSelectedItem() == 12);
     assert(menu.getCurrentPage() == 2);
 
     send_test_key(menu, SDLK_PAGEDOWN); // on last page -> wraps to page 0
+    assert(menu.getSelectedItem() == 0);
     assert(menu.getCurrentPage() == 0);
 
     // 4. Test PageUp navigation
-    send_test_key(menu, SDLK_PAGEUP); // on page 0 -> wraps to last page (page 2)
+    send_test_key(menu, SDLK_PAGEUP); // on page 0 -> wraps to last page (page 2, index 12)
+    assert(menu.getSelectedItem() == 12);
     assert(menu.getCurrentPage() == 2);
 
-    send_test_key(menu, SDLK_PAGEUP); // page 2 -> page 1
+    send_test_key(menu, SDLK_PAGEUP); // page 2 -> page 1 (index 6)
+    assert(menu.getSelectedItem() == 6);
     assert(menu.getCurrentPage() == 1);
 
-    send_test_key(menu, SDLK_PAGEUP); // page 1 -> page 0
+    send_test_key(menu, SDLK_PAGEUP); // page 1 -> page 0 (index 0)
+    assert(menu.getSelectedItem() == 0);
     assert(menu.getCurrentPage() == 0);
 
     std::cout << "Menu Paging Tests passed!" << std::endl << std::endl;

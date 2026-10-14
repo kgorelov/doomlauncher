@@ -7,7 +7,7 @@ This document establishes the technical design and phased implementation roadmap
 ## 1. Objectives & Architectural Blueprint
 
 The improvements focus on refining the user experience in four core areas:
-1. **Paging System**: Restrict the menu display to a maximum of 7 items per page, with seamless wrapping/navigation and a page indicator.
+1. **Paging System**: Restrict the menu display to a maximum of 6 items per page, with seamless wrapping/navigation and a page indicator.
 2. **On-Screen Display (OSD)**: Remove engine tags from game titles to restore a clean, authentic Doom aesthetic, displaying engine details and command strings in a dedicated bottom-left HUD/OSD above the fire effect.
 3. **Dedicated OSD Font**: Replace the stylized title font with a small, highly readable Doom text font for command strings, paths, and metadata.
 4. **Function Key Shortcuts & Overlays (F1–F12)**: Implement classic Doom-style function keys:
@@ -49,7 +49,7 @@ The improvements focus on refining the user experience in four core areas:
 
 - **Constants**:
   ```cpp
-  constexpr int ITEMS_PER_PAGE = 7;
+  constexpr int ITEMS_PER_PAGE = 6;
   ```
 - **State Computation**:
   - `int totalItems = static_cast<int>(menuItems.size());`
@@ -58,12 +58,12 @@ The improvements focus on refining the user experience in four core areas:
   - `int pageStartIndex = currentPage * ITEMS_PER_PAGE;`
   - `int pageEndIndex = std::min(pageStartIndex + ITEMS_PER_PAGE, totalItems);`
 - **Navigation Mechanics**:
-  - `SDLK_DOWN`: Increments `selectedItem` globally (`(selectedItem + 1) % totalItems`). When moving past the 7th item on page $K$, `currentPage` automatically becomes $K+1$. Moving past the last item of the last page wraps to index `0` (page 0).
+  - `SDLK_DOWN`: Increments `selectedItem` globally (`(selectedItem + 1) % totalItems`). When moving past the 6th item on page $K$, `currentPage` automatically becomes $K+1$. Moving past the last item of the last page wraps to index `0` (page 0).
   - `SDLK_UP`: Decrements `selectedItem` globally (`(selectedItem - 1 + totalItems) % totalItems`). Moving above the 1st item of page $K$ transitions to page $K-1$. Moving above item `0` wraps to the last item on the last page.
   - `SDLK_PAGEDOWN`: Advances cursor by `ITEMS_PER_PAGE`. If on the last page, wraps to the first page.
   - `SDLK_PAGEUP`: Retreats cursor by `ITEMS_PER_PAGE`. If on the first page, wraps to the last page.
 - **Page Indicator**:
-  - Rendered below the 7th menu slot in the OSD text font: `[ Page X of Y ]` or `< Page X of Y >`.
+  - Rendered below the 6th menu slot in the OSD text font: `[ Page X of Y ]` or `< Page X of Y >`.
 
 ---
 
@@ -177,7 +177,7 @@ enum class OverlayState {
 ## 3. Phased Implementation Roadmap
 
 ### Phase 1: Paging Architecture
-- Refactor [`Menu`](file:///home/kgorelov/git/doomlauncher/src/menu.h) / [`src/menu.cpp`](file:///home/kgorelov/git/doomlauncher/src/menu.cpp) to support `ITEMS_PER_PAGE = 7`.
+- Refactor [`Menu`](file:///home/kgorelov/git/doomlauncher/src/menu.h) / [`src/menu.cpp`](file:///home/kgorelov/git/doomlauncher/src/menu.cpp) to support `ITEMS_PER_PAGE = 6`.
 - Implement page window slicing: only render items `[pageStartIndex, pageEndIndex)`.
 - Implement `SDLK_PAGEUP` and `SDLK_PAGEDOWN` handlers.
 - Update `SDLK_UP` and `SDLK_DOWN` to seamlessly cross page boundaries.
@@ -222,7 +222,7 @@ enum class OverlayState {
 ## 4. Execution Checklist
 
 - [x] **Step 1: Paging System**
-  - [x] Add `ITEMS_PER_PAGE = 7` in [`src/menu.h`](file:///home/kgorelov/git/doomlauncher/src/menu.h).
+  - [x] Add `ITEMS_PER_PAGE = 6` in [`src/menu.h`](file:///home/kgorelov/git/doomlauncher/src/menu.h).
   - [x] Implement slice rendering and page indicator in [`src/menu.cpp`](file:///home/kgorelov/git/doomlauncher/src/menu.cpp).
   - [x] Implement `SDLK_PAGEUP` / `SDLK_PAGEDOWN` and wrap-around page boundary navigation in [`Menu::handleEvent`](file:///home/kgorelov/git/doomlauncher/src/menu.cpp).
 - [ ] **Step 2: OSD Redesign**

@@ -130,6 +130,7 @@ void Menu::render() {
     SDL_Color yellow = { 255, 255, 0, 255 };
     SDL_Color gray = { 130, 130, 130, 255 };
     SDL_Color darkRed = { 180, 50, 50, 255 };
+    SDL_Color green = { 100, 255, 100, 255 };
 
     int totalItems = static_cast<int>(menuItems.size());
     int totalPages = (totalItems + ITEMS_PER_PAGE - 1) / ITEMS_PER_PAGE;
@@ -138,9 +139,15 @@ void Menu::render() {
     int pageStartIndex = currentPage * ITEMS_PER_PAGE;
     int pageEndIndex = std::min(pageStartIndex + ITEMS_PER_PAGE, totalItems);
 
-    int fontHeight = TTF_FontHeight(font);
+    int smallFontHeight = smallFont ? TTF_FontHeight(smallFont) : 18;
+    int lineSpacing = smallFontHeight + 4;
+    int osdStartY = screenHeight - (3 * lineSpacing + 12);
+    int osdX = 30;
+
+    int fontHeight = font ? TTF_FontHeight(font) : 40;
     int totalMenuHeight = ITEMS_PER_PAGE * fontHeight;
-    int startY = (screenHeight - totalMenuHeight) / 2 - 25;
+    int availableHeight = osdStartY - 20;
+    int startY = (availableHeight - totalMenuHeight) / 2;
     if (startY < 20) startY = 20;
 
     for (int i = pageStartIndex; i < pageEndIndex; ++i) {
@@ -157,20 +164,6 @@ void Menu::render() {
         int slotIndex = i - pageStartIndex;
         int y = startY + slotIndex * fontHeight;
         std::string displayText = item.title;
-        if (item.status == doomlauncher::GameStatus::MissingAssets || !item.assets_found) {
-            displayText += " [Missing Asset]";
-        } else if (item.status == doomlauncher::GameStatus::NoCompatibleEngine) {
-            displayText += " [No Compatible Engine]";
-        } else if (item.module_name != "quit") {
-            const auto* eng = item.get_selected_engine();
-            if (eng) {
-                if (item.compatible_engines.size() > 1) {
-                    displayText += " < " + eng->title + " >";
-                } else {
-                    displayText += " [ " + eng->title + " ]";
-                }
-            }
-        }
         renderText(font, displayText, 0, y, color, true);
     }
 
@@ -178,33 +171,78 @@ void Menu::render() {
     if (smallFont) {
         std::string pageIndicator = "[ Page " + std::to_string(currentPage + 1) + " of " + std::to_string(totalPages) + " ]";
         int pageIndicatorY = startY + ITEMS_PER_PAGE * fontHeight + 8;
+        if (pageIndicatorY + smallFontHeight >= osdStartY) {
+            pageIndicatorY = osdStartY - smallFontHeight - 4;
+        }
         renderText(smallFont, pageIndicator, 0, pageIndicatorY, gray, true);
     }
 
-    // Render command preview / status message at bottom
-    if (selectedItem >= 0 && selectedItem < totalItems) {
+    // Render OSD / HUD Block at bottom left
+    if (smallFont && selectedItem >= 0 && selectedItem < totalItems) {
         const auto& item = menuItems[selectedItem];
-        std::string preview;
-        if (!statusMessage.empty()) {
-            preview = statusMessage;
+
+        std::string line1;
+        SDL_Color line1Color = yellow;
+
+        std::string line2;
+        SDL_Color line2Color = white;
+
+        std::string line3;
+        SDL_Color line3Color = gray;
+
+        if (item.module_name == "quit") {
+            line1 = "ACTION: Exit Doom Launcher";
+            line1Color = yellow;
+            line2 = "Press Enter or F10 to exit";
+            line2Color = gray;
+            line3 = "F1: Help | Enter: Exit | F10: Fast Quit";
         } else if (item.status == doomlauncher::GameStatus::MissingAssets || (!item.assets_found && !item.missing_assets.empty())) {
-            preview = !item.status_details.empty() ? item.status_details : "Asset missing: " + item.missing_assets[0];
+            line1 = "STATUS: Cannot launch - missing asset";
+            if (!item.missing_assets.empty()) {
+                line1 += " (" + item.missing_assets[0] + ")";
+            } else if (!item.status_details.empty()) {
+                line1 += " (" + item.status_details + ")";
+            }
+            line1Color = red;
+            line2 = "CMD: [Disabled - missing assets]";
+            line2Color = gray;
+            line3 = "F1: Help | F2: Save | F3: Info | F4: Engine | F10: Quit";
         } else if (item.status == doomlauncher::GameStatus::NoCompatibleEngine) {
-            preview = !item.status_details.empty() ? item.status_details : "No compatible engine installed";
-        } else if (item.module_name == "quit") {
-            preview = "Exit Doom Launcher";
+            line1 = "STATUS: Cannot launch - no compatible engine installed";
+            if (!item.status_details.empty()) {
+                line1 += " (" + item.status_details + ")";
+            }
+            line1Color = red;
+            line2 = "CMD: [Disabled - no compatible engine]";
+            line2Color = gray;
+            line3 = "F1: Help | F2: Save | F3: Info | F4: Engine | F10: Quit";
         } else {
+            const auto* eng = item.get_selected_engine();
+            std::string engTitle = eng ? eng->title : "Unknown";
+            line1 = "ENGINE: " + engTitle;
+            if (item.compatible_engines.size() > 1) {
+                line1 += " [" + std::to_string(item.compatible_engines.size()) + " compatible | F4: Change]";
+            } else if (item.compatible_engines.size() == 1) {
+                line1 += " [1 compatible]";
+            }
+            line1Color = yellow;
+
             std::string cmd = item.get_command();
             if (cmd.empty()) cmd = item.cmd;
-            preview = "CMD: " + cmd;
-            if (item.compatible_engines.size() > 1) {
-                preview += "  (Left/Right to switch engine)";
-            }
+            line2 = "CMD: " + cmd;
+            line2Color = white;
+
+            line3 = "F1: Help | F2: Save | F3: Info | F4: Engine | F10: Quit";
         }
 
-        if (smallFont) {
-            renderText(smallFont, preview, 0, screenHeight - 50, yellow, true);
+        if (!statusMessage.empty()) {
+            line3 = statusMessage;
+            line3Color = (statusMessage.find("Saved") != std::string::npos || statusMessage.find("saved") != std::string::npos) ? green : yellow;
         }
+
+        renderText(smallFont, line1, osdX, osdStartY, line1Color, false);
+        renderText(smallFont, line2, osdX, osdStartY + lineSpacing, line2Color, false);
+        renderText(smallFont, line3, osdX, osdStartY + 2 * lineSpacing, line3Color, false);
     }
 }
 
@@ -227,8 +265,15 @@ void Menu::renderText(TTF_Font* f, const std::string& text, int x, int y, SDL_Co
     } else {
         int textWidth = surface->w;
         int finalX = centered ? (screenWidth - textWidth) / 2 : x;
-        SDL_Rect renderQuad = { finalX, y, surface->w, surface->h };
-        SDL_RenderCopy(renderer, texture, nullptr, &renderQuad);
+        int maxW = screenWidth - finalX - 10;
+        if (maxW > 0 && surface->w > maxW) {
+            SDL_Rect srcRect = { 0, 0, maxW, surface->h };
+            SDL_Rect renderQuad = { finalX, y, maxW, surface->h };
+            SDL_RenderCopy(renderer, texture, &srcRect, &renderQuad);
+        } else {
+            SDL_Rect renderQuad = { finalX, y, surface->w, surface->h };
+            SDL_RenderCopy(renderer, texture, nullptr, &renderQuad);
+        }
         SDL_DestroyTexture(texture);
     }
 

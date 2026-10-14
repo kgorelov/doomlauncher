@@ -225,9 +225,9 @@ enum class OverlayState {
   - [x] Add `ITEMS_PER_PAGE = 6` in [`src/menu.h`](file:///home/kgorelov/git/doomlauncher/src/menu.h).
   - [x] Implement slice rendering and page indicator in [`src/menu.cpp`](file:///home/kgorelov/git/doomlauncher/src/menu.cpp).
   - [x] Implement `SDLK_PAGEUP` / `SDLK_PAGEDOWN` and wrap-around page boundary navigation in [`Menu::handleEvent`](file:///home/kgorelov/git/doomlauncher/src/menu.cpp).
-- [ ] **Step 2: OSD Redesign**
-  - [ ] Clean up game title row rendering (remove inline engine tags).
-  - [ ] Implement multi-line left-aligned OSD block above flames.
+- [x] **Step 2: OSD Redesign**
+  - [x] Clean up game title row rendering (remove inline engine tags).
+  - [x] Implement multi-line left-aligned OSD block above flames.
 - [ ] **Step 3: Font Integration**
   - [ ] Embed `Doom2016Text-GOlBq.ttf` in [`src/font_data.h`](file:///home/kgorelov/git/doomlauncher/src/font_data.h).
   - [ ] Initialize `osdFont` in [`src/main.cpp`](file:///home/kgorelov/git/doomlauncher/src/main.cpp) and route to `Menu`.

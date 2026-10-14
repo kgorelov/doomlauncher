@@ -25,6 +25,9 @@ public:
     int getTotalPages() const {
         return menuItems.empty() ? 1 : static_cast<int>((menuItems.size() + ITEMS_PER_PAGE - 1) / ITEMS_PER_PAGE);
     }
+    const std::vector<doomlauncher::ResolvedMenuItem>& getMenuItems() const { return menuItems; }
+    void setStatusMessage(const std::string& msg) { statusMessage = msg; }
+    const std::string& getStatusMessage() const { return statusMessage; }
 
 private:
     SDL_Renderer* renderer;

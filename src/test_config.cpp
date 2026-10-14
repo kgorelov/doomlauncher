@@ -1106,6 +1106,56 @@ void test_menu_paging() {
     std::cout << "Menu Paging Tests passed!" << std::endl << std::endl;
 }
 
+void test_menu_osd() {
+    std::cout << "--- Running Menu OSD Tests ---" << std::endl;
+    Menu menu(nullptr, nullptr, nullptr, 800, 600);
+
+    std::vector<doomlauncher::ResolvedMenuItem> items;
+    doomlauncher::ResolvedMenuItem it1;
+    it1.title = "Doom II";
+    it1.module_name = "doom2";
+    it1.status = doomlauncher::GameStatus::Ready;
+    it1.assets_found = true;
+
+    doomlauncher::EngineInfo eng1;
+    eng1.name = "boom";
+    eng1.title = "Boom";
+    eng1.cmd_template = "boom -iwad DOOM2.WAD";
+
+    doomlauncher::EngineInfo eng2;
+    eng2.name = "dsda";
+    eng2.title = "DSDA-Doom";
+    eng2.cmd_template = "dsda-doom -iwad DOOM2.WAD";
+
+    it1.compatible_engines = { eng1, eng2 };
+    it1.selected_engine_index = 0;
+    items.push_back(it1);
+
+    menu.setMenuItems(items);
+
+    assert(menu.getSelectedItem() == 0);
+    assert(menu.getMenuItems()[0].get_selected_engine()->name == "boom");
+
+    // Test status message setting and clearing
+    menu.setStatusMessage("Test status message");
+    assert(menu.getStatusMessage() == "Test status message");
+
+    // Right arrow switches engine and clears status message
+    send_test_key(menu, SDLK_RIGHT);
+    assert(menu.getMenuItems()[0].get_selected_engine()->name == "dsda");
+    assert(menu.getStatusMessage().empty());
+
+    // Left arrow switches back
+    send_test_key(menu, SDLK_LEFT);
+    assert(menu.getMenuItems()[0].get_selected_engine()->name == "boom");
+
+    // Ensure safe call to update/render with null fonts doesn't crash
+    menu.update();
+    menu.render();
+
+    std::cout << "Menu OSD Tests passed!" << std::endl << std::endl;
+}
+
 int main() {
     test_template_engine();
     test_module_registry();
@@ -1120,6 +1170,7 @@ int main() {
     test_phase6_engine_capability_matching();
     test_phase6_dynamic_template_generation();
     test_menu_paging();
+    test_menu_osd();
     std::cout << "ALL TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;
 }

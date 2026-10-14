@@ -93,9 +93,15 @@ int main(int argc, char* argv[]) {
 
     SDL_RWops* rw1 = SDL_RWFromConstMem(fonts_Doom2016Left_RpJDA_ttf, fonts_Doom2016Left_RpJDA_ttf_len);
     TTF_Font* font = TTF_OpenFontRW(rw1, 1, 84);
+    if (!font && fs::exists("fonts/Doom2016Left-RpJDA.ttf")) {
+        font = TTF_OpenFont("fonts/Doom2016Left-RpJDA.ttf", 84);
+    }
 
-    SDL_RWops* rw2 = SDL_RWFromConstMem(fonts_Doom2016Left_RpJDA_ttf, fonts_Doom2016Left_RpJDA_ttf_len);
+    SDL_RWops* rw2 = SDL_RWFromConstMem(fonts_Doom2016Text_GOlBq_ttf, fonts_Doom2016Text_GOlBq_ttf_len);
     TTF_Font* smallFont = TTF_OpenFontRW(rw2, 1, 24);
+    if (!smallFont && fs::exists("fonts/Doom2016Text-GOlBq.ttf")) {
+        smallFont = TTF_OpenFont("fonts/Doom2016Text-GOlBq.ttf", 24);
+    }
 
     if (font == nullptr || smallFont == nullptr) {
         std::cerr << "Failed to load font! SDL_ttf Error: " << TTF_GetError() << std::endl;

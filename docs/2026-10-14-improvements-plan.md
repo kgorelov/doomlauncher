@@ -228,9 +228,9 @@ enum class OverlayState {
 - [x] **Step 2: OSD Redesign**
   - [x] Clean up game title row rendering (remove inline engine tags).
   - [x] Implement multi-line left-aligned OSD block above flames.
-- [ ] **Step 3: Font Integration**
-  - [ ] Embed `Doom2016Text-GOlBq.ttf` in [`src/font_data.h`](file:///home/kgorelov/git/doomlauncher/src/font_data.h).
-  - [ ] Initialize `osdFont` in [`src/main.cpp`](file:///home/kgorelov/git/doomlauncher/src/main.cpp) and route to `Menu`.
+- [x] **Step 3: Font Integration**
+  - [x] Embed `Doom2016Text-GOlBq.ttf` in [`src/font_data.h`](file:///home/kgorelov/git/doomlauncher/src/font_data.h).
+  - [x] Initialize `osdFont` in [`src/main.cpp`](file:///home/kgorelov/git/doomlauncher/src/main.cpp) and route to `Menu`.
 - [ ] **Step 4: Function Key Handlers & Modal Dialogs**
   - [ ] Add `OverlayState` enum in [`src/menu.h`](file:///home/kgorelov/git/doomlauncher/src/menu.h).
   - [ ] Implement F1 Help overlay.

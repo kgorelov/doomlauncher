@@ -139,16 +139,22 @@ void Menu::render() {
     int pageStartIndex = currentPage * ITEMS_PER_PAGE;
     int pageEndIndex = std::min(pageStartIndex + ITEMS_PER_PAGE, totalItems);
 
-    int smallFontHeight = smallFont ? TTF_FontHeight(smallFont) : 18;
+    int smallFontHeight = smallFont ? TTF_FontHeight(smallFont) : 24;
     int lineSpacing = smallFontHeight + 4;
-    int osdStartY = screenHeight - (3 * lineSpacing + 12);
+    int osdStartY = screenHeight - (5 * lineSpacing + 12);
     int osdX = 30;
 
     int fontHeight = font ? TTF_FontHeight(font) : 40;
     int totalMenuHeight = ITEMS_PER_PAGE * fontHeight;
-    int availableHeight = osdStartY - 20;
-    int startY = (availableHeight - totalMenuHeight) / 2;
-    if (startY < 20) startY = 20;
+    int pageIndicatorHeight = smallFontHeight + 8;
+    int maxAvailableForMenu = osdStartY - 20 - pageIndicatorHeight - 10;
+    int itemSpacing = fontHeight;
+    if (totalMenuHeight > maxAvailableForMenu && maxAvailableForMenu > 0) {
+        itemSpacing = maxAvailableForMenu / ITEMS_PER_PAGE;
+    }
+    int effectiveMenuHeight = (ITEMS_PER_PAGE - 1) * itemSpacing + fontHeight;
+    int startY = (osdStartY - pageIndicatorHeight - 20 - effectiveMenuHeight) / 2 + 10;
+    if (startY < 15) startY = 15;
 
     for (int i = pageStartIndex; i < pageEndIndex; ++i) {
         const auto& item = menuItems[i];
@@ -162,7 +168,7 @@ void Menu::render() {
         }
 
         int slotIndex = i - pageStartIndex;
-        int y = startY + slotIndex * fontHeight;
+        int y = startY + slotIndex * itemSpacing;
         std::string displayText = item.title;
         renderText(font, displayText, 0, y, color, true);
     }
@@ -170,7 +176,7 @@ void Menu::render() {
     // Render page indicator under menu
     if (smallFont) {
         std::string pageIndicator = "[ Page " + std::to_string(currentPage + 1) + " of " + std::to_string(totalPages) + " ]";
-        int pageIndicatorY = startY + ITEMS_PER_PAGE * fontHeight + 8;
+        int pageIndicatorY = startY + (ITEMS_PER_PAGE - 1) * itemSpacing + fontHeight + 8;
         if (pageIndicatorY + smallFontHeight >= osdStartY) {
             pageIndicatorY = osdStartY - smallFontHeight - 4;
         }

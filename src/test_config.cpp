@@ -1439,6 +1439,123 @@ requires_capability = ["vanilla"]
     std::cout << "Phase 5 State Persistence Tests passed!" << std::endl << std::endl;
 }
 
+void test_gui_rendering_verification() {
+    std::cout << "--- Running Phase 6 Full GUI Rendering Verification Tests ---" << std::endl;
+    setenv("SDL_VIDEODRIVER", "dummy", 1);
+
+    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+        std::cerr << "Warning: SDL dummy video driver not available, skipping GUI rendering test." << std::endl;
+        return;
+    }
+    if (TTF_Init() == -1) {
+        std::cerr << "Warning: TTF_Init failed, skipping GUI rendering test." << std::endl;
+        SDL_Quit();
+        return;
+    }
+
+    SDL_Window* window = SDL_CreateWindow("Test", 0, 0, 800, 600, SDL_WINDOW_HIDDEN);
+    assert(window != nullptr);
+
+    SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
+    assert(renderer != nullptr);
+
+    TTF_Font* titleFont = TTF_OpenFont("fonts/Doom2016Left-RpJDA.ttf", 84);
+    TTF_Font* monoFont = TTF_OpenFont("fonts/Hack-Regular.ttf", 20);
+    TTF_Font* hudFont = TTF_OpenFont("fonts/DoomClassicHUD.ttf", 20);
+
+    assert(titleFont != nullptr);
+    assert(monoFont != nullptr);
+    assert(hudFont != nullptr);
+
+    Menu menu(renderer, titleFont, monoFont, 800, 600, hudFont);
+
+    // Create 8 items to test multi-page rendering
+    std::vector<ResolvedMenuItem> items;
+    for (int i = 1; i <= 8; ++i) {
+        ResolvedMenuItem item;
+        item.title = "Game " + std::to_string(i);
+        item.module_name = "game_" + std::to_string(i);
+        item.status = GameStatus::Ready;
+        item.assets_found = true;
+        item.resolved_iwad_path = "/path/to/DOOM2.WAD";
+        item.cmd = "engine -iwad DOOM2.WAD";
+
+        EngineInfo eng1;
+        eng1.name = "boom";
+        eng1.title = "Boom Engine";
+        eng1.binary = "/usr/games/boom";
+        eng1.installed_binary_path = "/usr/games/boom";
+        eng1.cmd_template = "{{BIN}} -iwad {{IWAD}}";
+
+        EngineInfo eng2;
+        eng2.name = "gzdoom";
+        eng2.title = "GZDoom";
+        eng2.binary = "/usr/games/gzdoom";
+        eng2.installed_binary_path = "/usr/games/gzdoom";
+        eng2.cmd_template = "{{BIN}} -iwad {{IWAD}}";
+
+        item.compatible_engines = { eng1, eng2 };
+        items.push_back(item);
+    }
+    menu.setMenuItems(items);
+
+    // 1. Render default main menu (page 0)
+    menu.render();
+
+    // 2. Render next page (page 1)
+    send_test_key(menu, SDLK_PAGEDOWN);
+    assert(menu.getCurrentPage() == 1);
+    menu.render();
+
+    // 3. Render Help overlay (F1)
+    send_test_key(menu, SDLK_F1);
+    assert(menu.getOverlayState() == OverlayState::Help);
+    menu.render();
+    send_test_key(menu, SDLK_ESCAPE);
+    assert(menu.getOverlayState() == OverlayState::None);
+
+    // 4. Render Module Info overlay (F3)
+    send_test_key(menu, SDLK_F3);
+    assert(menu.getOverlayState() == OverlayState::ModuleInfo);
+    menu.render();
+    send_test_key(menu, SDLK_ESCAPE);
+    assert(menu.getOverlayState() == OverlayState::None);
+
+    // 5. Render Engine Select overlay (F4)
+    send_test_key(menu, SDLK_F4);
+    assert(menu.getOverlayState() == OverlayState::EngineSelect);
+    menu.render();
+    send_test_key(menu, SDLK_ESCAPE);
+    assert(menu.getOverlayState() == OverlayState::None);
+
+    // 6. Render Quit Confirm overlay (F10)
+    send_test_key(menu, SDLK_F10);
+    assert(menu.getOverlayState() == OverlayState::QuitConfirm);
+    menu.render();
+    send_test_key(menu, SDLK_ESCAPE);
+    assert(menu.getOverlayState() == OverlayState::None);
+
+    // 7. Render font switch to Classic Doom HUD (F9)
+    send_test_key(menu, SDLK_F9);
+    assert(menu.isUsingAlternateFont());
+    menu.render();
+
+    // 8. Render save status message in OSD
+    menu.setStatusMessage("Settings saved to ~/.config/doomlauncher/state.toml");
+    menu.render();
+
+    // Clean up
+    TTF_CloseFont(titleFont);
+    TTF_CloseFont(monoFont);
+    TTF_CloseFont(hudFont);
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
+    TTF_Quit();
+    SDL_Quit();
+
+    std::cout << "Phase 6 Full GUI Rendering Verification Tests passed!" << std::endl << std::endl;
+}
+
 int main() {
     test_template_engine();
     test_module_registry();
@@ -1456,6 +1573,7 @@ int main() {
     test_menu_osd();
     test_menu_overlays();
     test_phase5_state_persistence();
+    test_gui_rendering_verification();
     std::cout << "ALL TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;
 }

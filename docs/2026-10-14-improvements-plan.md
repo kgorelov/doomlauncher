@@ -237,11 +237,11 @@ enum class OverlayState {
   - [x] Implement F3 Module Info dialog.
   - [x] Implement F4 Engine Picker modal.
   - [x] Implement F10 Quit confirmation.
-- [ ] **Step 5: State Persistence**
-  - [ ] Implement `save_state()` / `load_state()` in [`src/config_module.cpp`](file:///home/kgorelov/git/doomlauncher/src/config_module.cpp).
-  - [ ] Connect F2 in [`Menu::handleEvent`](file:///home/kgorelov/git/doomlauncher/src/menu.cpp) to persist settings.
-  - [ ] Restore state on startup in [`src/main.cpp`](file:///home/kgorelov/git/doomlauncher/src/main.cpp).
-- [ ] **Step 6: Testing & Verification**
-  - [ ] Add unit tests for state serialization in [`src/test_config.cpp`](file:///home/kgorelov/git/doomlauncher/src/test_config.cpp).
-  - [ ] Verify clean compilation with `-Wall -Wextra`.
-  - [ ] Verify test suite execution.
+- [x] **Step 5: State Persistence**
+  - [x] Implement `save_state()` / `load_state()` in [`src/config_module.cpp`](file:///home/kgorelov/git/doomlauncher/src/config_module.cpp).
+  - [x] Connect F2 in [`Menu::handleEvent`](file:///home/kgorelov/git/doomlauncher/src/menu.cpp) to persist settings.
+  - [x] Restore state on startup in [`src/main.cpp`](file:///home/kgorelov/git/doomlauncher/src/main.cpp).
+- [x] **Step 6: Testing & Verification**
+  - [x] Add unit tests for state serialization in [`src/test_config.cpp`](file:///home/kgorelov/git/doomlauncher/src/test_config.cpp).
+  - [x] Verify clean compilation with `-Wall -Wextra`.
+  - [x] Verify test suite execution.

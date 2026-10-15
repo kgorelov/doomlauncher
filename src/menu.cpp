@@ -1,5 +1,6 @@
 #include "menu.h"
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 
 Menu::Menu(SDL_Renderer* renderer, TTF_Font* font, TTF_Font* smallFont, int screenWidth, int screenHeight, TTF_Font* altSmallFont)
@@ -146,6 +147,9 @@ void Menu::handleEvent(const SDL_Event& event) {
                 overlayState = OverlayState::Help;
                 statusMessage.clear();
                 break;
+            case SDLK_F2:
+                saveSettings();
+                break;
             case SDLK_F3:
                 if (selectedItem >= 0 && selectedItem < totalItems && menuItems[selectedItem].module_name != "quit") {
                     overlayState = OverlayState::ModuleInfo;
@@ -170,6 +174,29 @@ void Menu::handleEvent(const SDL_Event& event) {
                 statusMessage.clear();
                 break;
         }
+    }
+}
+
+void Menu::saveSettings() {
+    std::string savedPath;
+    bool success = false;
+    if (saveCallback) {
+        success = saveCallback(menuItems, savedPath);
+    } else if (moduleRegistry) {
+        success = moduleRegistry->save_state(menuItems, savedPath);
+    } else {
+        success = doomlauncher::ModuleRegistry::save_state_from_items(menuItems, savedPath);
+    }
+
+    if (success) {
+        std::string displayPath = savedPath;
+        const char* home = std::getenv("HOME");
+        if (home && displayPath.rfind(home, 0) == 0) {
+            displayPath = "~" + displayPath.substr(std::strlen(home));
+        }
+        statusMessage = "Settings saved to " + displayPath;
+    } else {
+        statusMessage = "Failed to save settings to " + (!savedPath.empty() ? savedPath : "state.toml");
     }
 }
 

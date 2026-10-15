@@ -4,6 +4,7 @@
 #include "config_module.h"
 #include <SDL.h>
 #include <SDL_ttf.h>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -46,6 +47,14 @@ public:
     int getModalCursorIndex() const { return modalCursorIndex; }
     void setModalCursorIndex(int idx) { modalCursorIndex = idx; }
 
+    void setModuleRegistry(doomlauncher::ModuleRegistry* reg) { moduleRegistry = reg; }
+    doomlauncher::ModuleRegistry* getModuleRegistry() const { return moduleRegistry; }
+
+    void setSaveCallback(std::function<bool(const std::vector<doomlauncher::ResolvedMenuItem>&, std::string&)> cb) {
+        saveCallback = cb;
+    }
+    void saveSettings();
+
 private:
     SDL_Renderer* renderer;
     TTF_Font* font;
@@ -60,6 +69,8 @@ private:
     std::string statusMessage;
     OverlayState overlayState = OverlayState::None;
     int modalCursorIndex = 0;
+    doomlauncher::ModuleRegistry* moduleRegistry = nullptr;
+    std::function<bool(const std::vector<doomlauncher::ResolvedMenuItem>&, std::string&)> saveCallback;
 
     void renderText(TTF_Font* f, const std::string& text, int x, int y, SDL_Color color, bool centered = false, int maxAllowedWidth = 0);
     void launchSelected();

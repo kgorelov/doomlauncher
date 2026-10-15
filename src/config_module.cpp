@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <glob.h>
 #include <iostream>
 #include <stdexcept>
@@ -311,6 +312,125 @@ void ModuleRegistry::set_user_config(const UserConfig& config) {
 
 const UserConfig& ModuleRegistry::get_user_config() const {
     return user_config;
+}
+
+std::string ModuleRegistry::get_default_state_path() {
+    const char* env_state = std::getenv("DOOMLAUNCHER_STATE");
+    if (env_state && *env_state) {
+        return env_state;
+    }
+    const char* xdg_cfg = std::getenv("XDG_CONFIG_HOME");
+    if (xdg_cfg && *xdg_cfg) {
+        return std::string(xdg_cfg) + "/doomlauncher/state.toml";
+    }
+    return AssetResolver::expand_path("~/.config/doomlauncher/state.toml");
+}
+
+bool ModuleRegistry::load_state(const std::string& filepath) {
+    std::string path_str = filepath.empty() ? get_default_state_path() : filepath;
+    std::string resolved_path = AssetResolver::expand_path(path_str);
+
+    std::error_code ec;
+    if (!fs::exists(resolved_path, ec)) {
+        return false;
+    }
+
+    try {
+        toml::table tbl = toml::parse_file(resolved_path);
+        if (auto engines = tbl.get_as<toml::table>("engines")) {
+            for (const auto& [key, val] : *engines) {
+                if (auto str = val.as_string()) {
+                    saved_engines[std::string(key.str())] = std::string(str->get());
+                }
+            }
+        }
+        return true;
+    } catch (const toml::parse_error& err) {
+        std::cerr << "Warning: Error parsing state file '" << resolved_path << "': " << err << std::endl;
+        return false;
+    }
+}
+
+bool ModuleRegistry::save_state(const std::string& filepath) const {
+    std::string path_str = filepath.empty() ? get_default_state_path() : filepath;
+    std::string resolved_path = AssetResolver::expand_path(path_str);
+
+    try {
+        fs::path p(resolved_path);
+        if (p.has_parent_path()) {
+            std::error_code ec;
+            fs::create_directories(p.parent_path(), ec);
+        }
+
+        toml::table tbl;
+        std::error_code ec;
+        if (fs::exists(p, ec)) {
+            try {
+                tbl = toml::parse_file(resolved_path);
+            } catch (...) {
+                tbl = toml::table();
+            }
+        }
+
+        toml::table engines_tbl;
+        for (const auto& [mod_name, eng_name] : saved_engines) {
+            engines_tbl.insert_or_assign(mod_name, eng_name);
+        }
+        tbl.insert_or_assign("engines", engines_tbl);
+
+        std::ofstream out(resolved_path);
+        if (!out.is_open()) {
+            return false;
+        }
+        out << tbl << "\n";
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "Warning: Failed to save state to '" << resolved_path << "': " << e.what() << std::endl;
+        return false;
+    }
+}
+
+bool ModuleRegistry::save_state(const std::vector<ResolvedMenuItem>& items, std::string& out_saved_path, const std::string& filepath) {
+    std::string path_str = filepath.empty() ? get_default_state_path() : filepath;
+    out_saved_path = AssetResolver::expand_path(path_str);
+
+    for (const auto& item : items) {
+        if (item.module_name.empty() || item.module_name == "quit") continue;
+        const auto* eng = item.get_selected_engine();
+        if (eng) {
+            saved_engines[item.module_name] = eng->name;
+        }
+    }
+
+    return save_state(out_saved_path);
+}
+
+bool ModuleRegistry::save_state(const std::vector<ResolvedMenuItem>& items, const std::string& filepath) {
+    std::string dummy;
+    return save_state(items, dummy, filepath);
+}
+
+void ModuleRegistry::set_saved_engine(const std::string& module_name, const std::string& engine_name) {
+    saved_engines[module_name] = engine_name;
+}
+
+const std::unordered_map<std::string, std::string>& ModuleRegistry::get_saved_engines() const {
+    return saved_engines;
+}
+
+void ModuleRegistry::apply_saved_state(std::vector<ResolvedMenuItem>& items) const {
+    for (auto& item : items) {
+        if (item.module_name == "quit" || item.compatible_engines.empty()) continue;
+        auto it = saved_engines.find(item.module_name);
+        if (it != saved_engines.end()) {
+            item.select_engine(it->second);
+        }
+    }
+}
+
+bool ModuleRegistry::save_state_from_items(const std::vector<ResolvedMenuItem>& items, std::string& out_saved_path, const std::string& filepath) {
+    ModuleRegistry reg;
+    return reg.save_state(items, out_saved_path, filepath);
 }
 
 void ModuleRegistry::set_engine_registry(const EngineRegistry& registry) {
@@ -661,14 +781,14 @@ std::vector<ResolvedMenuItem> ModuleRegistry::resolve_menu_items() {
         }
         item.compatible_engines = engine_registry.find_compatible_engines(req_caps, true);
 
-        // Check if user has a default preferred engine that is compatible
-        if (!user_config.default_engine.empty() && !item.compatible_engines.empty()) {
-            for (size_t i = 0; i < item.compatible_engines.size(); ++i) {
-                if (item.compatible_engines[i].name == user_config.default_engine) {
-                    item.selected_engine_index = i;
-                    break;
-                }
-            }
+        // Check if there is a saved engine preference for this module, or fallback to default engine
+        bool engine_selected = false;
+        auto saved_it = saved_engines.find(item.module_name);
+        if (saved_it != saved_engines.end() && !item.compatible_engines.empty()) {
+            engine_selected = item.select_engine(saved_it->second);
+        }
+        if (!engine_selected && !user_config.default_engine.empty() && !item.compatible_engines.empty()) {
+            item.select_engine(user_config.default_engine);
         }
 
         // Determine GameStatus

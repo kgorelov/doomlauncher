@@ -1301,6 +1301,144 @@ void test_menu_overlays() {
     std::cout << "Menu Phase 4 Modal Overlays Tests passed!" << std::endl << std::endl;
 }
 
+void test_phase5_state_persistence() {
+    std::cout << "--- Running Phase 5 State Persistence Tests ---" << std::endl;
+    namespace fs = std::filesystem;
+
+    fs::path temp_state_file = "temp_test_state.toml";
+    std::error_code ec;
+    fs::remove(temp_state_file, ec);
+
+    // 1. Test basic save and load in ModuleRegistry
+    {
+        ModuleRegistry reg;
+        reg.set_saved_engine("doom2", "gzdoom");
+        reg.set_saved_engine("sigil", "boom");
+        assert(reg.save_state(temp_state_file.string()));
+        assert(fs::exists(temp_state_file));
+    }
+
+    {
+        ModuleRegistry reg2;
+        assert(reg2.load_state(temp_state_file.string()));
+        const auto& saved = reg2.get_saved_engines();
+        assert(saved.size() == 2);
+        assert(saved.at("doom2") == "gzdoom");
+        assert(saved.at("sigil") == "boom");
+    }
+
+    // 2. Test engine restoration during resolve_menu_items
+    fs::path temp_asset_dir = "temp_p5_assets";
+    fs::create_directories(temp_asset_dir, ec);
+    {
+        std::ofstream f(temp_asset_dir / "DOOM2.WAD");
+        f << "IWAD";
+    }
+
+    {
+        std::ofstream eng1_file("test_p5_boom.toml");
+        eng1_file << R"(
+[boom]
+type = "engine"
+title = "Boom Engine"
+binary = "sh"
+capabilities = ["vanilla", "boom"]
+cmd_template = "{{BIN}} -iwad {{IWAD}}"
+)";
+    }
+
+    {
+        std::ofstream eng2_file("test_p5_gzdoom.toml");
+        eng2_file << R"(
+[gzdoom]
+type = "engine"
+title = "GZDoom"
+binary = "sh"
+capabilities = ["vanilla", "boom", "gzdoom"]
+cmd_template = "{{BIN}} -iwad {{IWAD}}"
+)";
+    }
+
+    {
+        std::ofstream game_file("test_p5_game.toml");
+        game_file << R"(
+[doom2]
+type = "game"
+title = "Doom 2"
+iwad = "DOOM2.WAD"
+requires_capability = ["vanilla"]
+)";
+    }
+
+    {
+        ModuleRegistry reg;
+        reg.get_asset_resolver().add_search_dir(temp_asset_dir.string());
+        assert(reg.load_file("test_p5_boom.toml"));
+        assert(reg.load_file("test_p5_gzdoom.toml"));
+        assert(reg.load_file("test_p5_game.toml"));
+
+        // Default: first compatible engine is selected (boom)
+        auto items = reg.resolve_menu_items();
+        assert(items.size() == 1);
+        assert(items[0].get_selected_engine()->name == "boom");
+
+        // Now load state with doom2 = "gzdoom"
+        assert(reg.load_state(temp_state_file.string()));
+        auto items_with_state = reg.resolve_menu_items();
+        assert(items_with_state.size() == 1);
+        assert(items_with_state[0].get_selected_engine()->name == "gzdoom");
+    }
+
+    // 3. Test Menu F2 integration
+    {
+        Menu menu(nullptr, nullptr, nullptr, 800, 600);
+        ModuleRegistry reg;
+        reg.get_asset_resolver().add_search_dir(temp_asset_dir.string());
+        assert(reg.load_file("test_p5_boom.toml"));
+        assert(reg.load_file("test_p5_gzdoom.toml"));
+        assert(reg.load_file("test_p5_game.toml"));
+        assert(reg.load_state(temp_state_file.string()));
+
+        auto items = reg.resolve_menu_items();
+        menu.setMenuItems(items);
+        menu.setModuleRegistry(&reg);
+
+        // Initially gzdoom is selected
+        assert(menu.getMenuItems()[0].get_selected_engine()->name == "gzdoom");
+
+        // Switch to boom with Right arrow
+        send_test_key(menu, SDLK_RIGHT);
+        assert(menu.getMenuItems()[0].get_selected_engine()->name == "boom");
+
+        // Set custom state path via DOOMLAUNCHER_STATE env var to avoid overwriting real user state
+        fs::path f2_state_file = "temp_p5_f2_state.toml";
+        fs::remove(f2_state_file, ec);
+        setenv("DOOMLAUNCHER_STATE", f2_state_file.c_str(), 1);
+
+        // Press F2 to save settings
+        send_test_key(menu, SDLK_F2);
+        assert(menu.getStatusMessage().find("Settings saved to") != std::string::npos);
+        assert(fs::exists(f2_state_file));
+
+        // Verify the saved content in f2_state_file has doom2 = "boom"
+        ModuleRegistry reg_verify;
+        assert(reg_verify.load_state(f2_state_file.string()));
+        assert(reg_verify.get_saved_engines().at("doom2") == "boom");
+
+        unsetenv("DOOMLAUNCHER_STATE");
+        fs::remove(f2_state_file, ec);
+    }
+
+    // Clean up
+    fs::remove(temp_state_file, ec);
+    fs::remove_all(temp_asset_dir, ec);
+    std::remove("test_p5_boom.toml");
+    std::remove("test_p5_gzdoom.toml");
+    std::remove("test_p5_game.toml");
+
+    std::cout << "Phase 5 State Persistence Tests passed!" << std::endl << std::endl;
+}
+
 int main() {
     test_template_engine();
     test_module_registry();
@@ -1317,6 +1455,7 @@ int main() {
     test_menu_paging();
     test_menu_osd();
     test_menu_overlays();
+    test_phase5_state_persistence();
     std::cout << "ALL TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;
 }

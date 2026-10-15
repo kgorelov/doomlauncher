@@ -124,6 +124,7 @@ int main(int argc, char* argv[]) {
     // Load config modules
     doomlauncher::ModuleRegistry registry;
     registry.load_user_config();
+    registry.load_state();
 
     if (!modulePaths.empty()) {
         for (const auto& path : modulePaths) {
@@ -165,6 +166,7 @@ int main(int argc, char* argv[]) {
     std::cout << "Resolved " << resolvedItems.size() << " menu item(s) from config." << std::endl;
 
     Menu menu(renderer, font, smallFont, screenWidth, screenHeight, altSmallFont);
+    menu.setModuleRegistry(&registry);
     if (registry.get_user_config().osd_font == "doom" || registry.get_user_config().osd_font == "classic") {
         menu.setUseAlternateFont(true);
     }

@@ -1168,6 +1168,139 @@ void test_menu_osd() {
     std::cout << "Menu OSD Tests passed!" << std::endl << std::endl;
 }
 
+void test_menu_overlays() {
+    std::cout << "--- Running Menu Phase 4 Modal Overlays Tests ---" << std::endl;
+    Menu menu(nullptr, nullptr, nullptr, 800, 600);
+
+    std::vector<doomlauncher::ResolvedMenuItem> items;
+    doomlauncher::ResolvedMenuItem it1;
+    it1.title = "Doom II";
+    it1.module_name = "doom2";
+    it1.status = doomlauncher::GameStatus::Ready;
+    it1.assets_found = true;
+
+    doomlauncher::EngineInfo eng1;
+    eng1.name = "boom";
+    eng1.title = "Boom";
+    eng1.binary = "/usr/games/boom";
+    eng1.cmd_template = "{{BIN}} -iwad DOOM2.WAD";
+
+    doomlauncher::EngineInfo eng2;
+    eng2.name = "dsda";
+    eng2.title = "DSDA-Doom";
+    eng2.binary = "/usr/games/dsda-doom";
+    eng2.cmd_template = "{{BIN}} -iwad DOOM2.WAD";
+
+    it1.compatible_engines = { eng1, eng2 };
+    it1.selected_engine_index = 0;
+    it1.cmd = it1.get_command();
+    items.push_back(it1);
+
+    menu.setMenuItems(items);
+
+    // Initial state
+    assert(menu.getOverlayState() == OverlayState::None);
+
+    // 1. F1: Help Overlay
+    send_test_key(menu, SDLK_F1);
+    assert(menu.getOverlayState() == OverlayState::Help);
+    // Dismiss with Escape
+    send_test_key(menu, SDLK_ESCAPE);
+    assert(menu.getOverlayState() == OverlayState::None);
+    // Reopen with F1, close with F1
+    send_test_key(menu, SDLK_F1);
+    assert(menu.getOverlayState() == OverlayState::Help);
+    send_test_key(menu, SDLK_F1);
+    assert(menu.getOverlayState() == OverlayState::None);
+    // Reopen with F1, close with Enter
+    send_test_key(menu, SDLK_F1);
+    assert(menu.getOverlayState() == OverlayState::Help);
+    send_test_key(menu, SDLK_RETURN);
+    assert(menu.getOverlayState() == OverlayState::None);
+
+    // 2. F3: Selected Module Info
+    send_test_key(menu, SDLK_F3);
+    assert(menu.getOverlayState() == OverlayState::ModuleInfo);
+    // Dismiss with Escape
+    send_test_key(menu, SDLK_ESCAPE);
+    assert(menu.getOverlayState() == OverlayState::None);
+    // Reopen with F3, close with F3
+    send_test_key(menu, SDLK_F3);
+    assert(menu.getOverlayState() == OverlayState::ModuleInfo);
+    send_test_key(menu, SDLK_F3);
+    assert(menu.getOverlayState() == OverlayState::None);
+
+    // 3. F4: Engine Selection Modal
+    send_test_key(menu, SDLK_F4);
+    assert(menu.getOverlayState() == OverlayState::EngineSelect);
+    assert(menu.getModalCursorIndex() == 0);
+
+    // Navigate with Down arrow
+    send_test_key(menu, SDLK_DOWN);
+    assert(menu.getModalCursorIndex() == 1);
+    // Wrap around Down -> 0
+    send_test_key(menu, SDLK_DOWN);
+    assert(menu.getModalCursorIndex() == 0);
+    // Wrap around Up -> 1
+    send_test_key(menu, SDLK_UP);
+    assert(menu.getModalCursorIndex() == 1);
+
+    // Dismiss with Escape without applying changes
+    send_test_key(menu, SDLK_ESCAPE);
+    assert(menu.getOverlayState() == OverlayState::None);
+    assert(menu.getMenuItems()[0].selected_engine_index == 0);
+
+    // Reopen F4, navigate to index 1, confirm with Return
+    send_test_key(menu, SDLK_F4);
+    assert(menu.getOverlayState() == OverlayState::EngineSelect);
+    assert(menu.getModalCursorIndex() == 0);
+    send_test_key(menu, SDLK_DOWN);
+    assert(menu.getModalCursorIndex() == 1);
+    send_test_key(menu, SDLK_RETURN);
+    assert(menu.getOverlayState() == OverlayState::None);
+    assert(menu.getMenuItems()[0].selected_engine_index == 1);
+    assert(menu.getMenuItems()[0].get_selected_engine()->name == "dsda");
+    assert(menu.getStatusMessage().find("DSDA-Doom") != std::string::npos);
+
+    // 4. F10 / Esc: Fast Quit Confirmation
+    assert(!menu.isQuitSelected());
+    send_test_key(menu, SDLK_F10);
+    assert(menu.getOverlayState() == OverlayState::QuitConfirm);
+    // Press 'n' to cancel
+    send_test_key(menu, SDLK_n);
+    assert(menu.getOverlayState() == OverlayState::None);
+    assert(!menu.isQuitSelected());
+
+    // Press Escape on main menu triggers QuitConfirm
+    send_test_key(menu, SDLK_ESCAPE);
+    assert(menu.getOverlayState() == OverlayState::QuitConfirm);
+    // Press Escape again cancels QuitConfirm
+    send_test_key(menu, SDLK_ESCAPE);
+    assert(menu.getOverlayState() == OverlayState::None);
+    assert(!menu.isQuitSelected());
+
+    // Open with F10, press 'y' to confirm exit
+    send_test_key(menu, SDLK_F10);
+    assert(menu.getOverlayState() == OverlayState::QuitConfirm);
+    send_test_key(menu, SDLK_y);
+    assert(menu.getOverlayState() == OverlayState::None);
+    assert(menu.isQuitSelected());
+
+    // 5. Headless rendering safety with active overlays
+    menu.setOverlayState(OverlayState::Help);
+    menu.render();
+    menu.setOverlayState(OverlayState::ModuleInfo);
+    menu.render();
+    menu.setOverlayState(OverlayState::EngineSelect);
+    menu.render();
+    menu.setOverlayState(OverlayState::QuitConfirm);
+    menu.render();
+    menu.setOverlayState(OverlayState::None);
+    menu.render();
+
+    std::cout << "Menu Phase 4 Modal Overlays Tests passed!" << std::endl << std::endl;
+}
+
 int main() {
     test_template_engine();
     test_module_registry();
@@ -1183,6 +1316,7 @@ int main() {
     test_phase6_dynamic_template_generation();
     test_menu_paging();
     test_menu_osd();
+    test_menu_overlays();
     std::cout << "ALL TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;
 }

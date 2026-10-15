@@ -7,6 +7,14 @@
 #include <string>
 #include <vector>
 
+enum class OverlayState {
+    None,
+    Help,
+    ModuleInfo,
+    EngineSelect,
+    QuitConfirm
+};
+
 class Menu {
 public:
     static constexpr int ITEMS_PER_PAGE = 6;
@@ -33,6 +41,11 @@ public:
     bool isUsingAlternateFont() const { return useAlternateFont; }
     void toggleOsdFont();
 
+    OverlayState getOverlayState() const { return overlayState; }
+    void setOverlayState(OverlayState state) { overlayState = state; }
+    int getModalCursorIndex() const { return modalCursorIndex; }
+    void setModalCursorIndex(int idx) { modalCursorIndex = idx; }
+
 private:
     SDL_Renderer* renderer;
     TTF_Font* font;
@@ -45,9 +58,16 @@ private:
     int selectedItem;
     bool quitSelected;
     std::string statusMessage;
+    OverlayState overlayState = OverlayState::None;
+    int modalCursorIndex = 0;
 
-    void renderText(TTF_Font* f, const std::string& text, int x, int y, SDL_Color color, bool centered = false);
+    void renderText(TTF_Font* f, const std::string& text, int x, int y, SDL_Color color, bool centered = false, int maxAllowedWidth = 0);
     void launchSelected();
+    void renderDialogBox(int x, int y, int w, int h, const std::string& title, TTF_Font* osdFont);
+    void renderHelpOverlay(TTF_Font* osdFont);
+    void renderModuleInfoOverlay(TTF_Font* osdFont);
+    void renderEngineSelectOverlay(TTF_Font* osdFont);
+    void renderQuitConfirmOverlay(TTF_Font* osdFont);
 };
 
 #endif // MENU_H

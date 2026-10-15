@@ -15,6 +15,7 @@ The improvements focus on refining the user experience in four core areas:
    - **F2**: Save current engine settings and preferences to [`state.toml`](file:///home/kgorelov/.config/doomlauncher/state.toml)
    - **F3**: Selected module details modal (WAD paths, complevel, capabilities, engines)
    - **F4**: Module engine picker modal
+   - **F9**: Toggle OSD font style (Clean Monospace vs. Classic Doom STCFN)
    - **F10**: Fast quit shortcut
 
 ```
@@ -82,20 +83,19 @@ The improvements focus on refining the user experience in four core areas:
   - **Row 2 (Command Line)**:
     - `CMD: /usr/games/dsda-doom -iwad /home/kgorelov/opt/doom/doom2/DOOM2.WAD -complevel 2`
   - **Row 3 (Shortcut Guide / Feedback)**:
-    - `F1: Help | F2: Save | F3: Info | F4: Engine | F10: Quit`
+    - `F1: Help | F2: Save | F3: Info | F4: Engine | F9: Font | F10: Quit`
     - Temporarily overridden when user triggers an action (e.g. `[ Settings saved to ~/.config/doomlauncher/state.toml ]` in green).
 
 ---
 
 ### 2.3 OSD Font Integration
 
-- **Current Font vs. New OSD Font**:
-  - Main menu title font: `fonts/Doom2016Left-RpJDA.ttf` (size 72-84, large angular uppercase logo font).
-  - OSD / HUD font: `fonts/Doom2016Text-GOlBq.ttf` (size 16-18, proportional text font with full ASCII lowercase, numbers, and symbols).
-- **Self-Contained Embedded Font**:
-  - Embed `Doom2016Text-GOlBq.ttf` into [`src/font_data.h`](file:///home/kgorelov/git/doomlauncher/src/font_data.h) as `fonts_Doom2016Text_GOlBq_ttf` (27,600 bytes) alongside the existing title font.
-  - Fall back to loading from disk if the binary is run in a development workspace.
-  - Instantiate in [`src/main.cpp`](file:///home/kgorelov/git/doomlauncher/src/main.cpp) as `TTF_Font* osdFont` and pass to [`Menu`](file:///home/kgorelov/git/doomlauncher/src/menu.h).
+- **Default Font**: Clean Console Monospace font (`fonts/Hack-Regular.ttf`, size 20) for maximum legibility and clean command lines.
+- **Alternative Font**: Classic Doom STCFN pixel HUD font (`fonts/DoomClassicHUD.ttf`, size 20) generated directly from DOOM2.WAD `STCFN` lumps.
+- **Dynamic Toggle & Preference**:
+  - Press <kbd>F9</kbd> in the launcher to toggle between Clean Monospace and Classic Doom HUD live.
+  - Configurable via `osd_font = "mono"` (default) or `osd_font = "doom"` in `~/.config/doomlauncher/config.toml`.
+- **Self-Contained Embedded Fonts**: Both fonts are embedded directly into [`src/font_data.h`](file:///home/kgorelov/git/doomlauncher/src/font_data.h) with disk fallbacks.
 
 ---
 
@@ -231,12 +231,12 @@ enum class OverlayState {
 - [x] **Step 3: Font Integration**
   - [x] Embed `Doom2016Text-GOlBq.ttf` in [`src/font_data.h`](file:///home/kgorelov/git/doomlauncher/src/font_data.h).
   - [x] Initialize `osdFont` in [`src/main.cpp`](file:///home/kgorelov/git/doomlauncher/src/main.cpp) and route to `Menu`.
-- [ ] **Step 4: Function Key Handlers & Modal Dialogs**
-  - [ ] Add `OverlayState` enum in [`src/menu.h`](file:///home/kgorelov/git/doomlauncher/src/menu.h).
-  - [ ] Implement F1 Help overlay.
-  - [ ] Implement F3 Module Info dialog.
-  - [ ] Implement F4 Engine Picker modal.
-  - [ ] Implement F10 Quit confirmation.
+- [x] **Step 4: Function Key Handlers & Modal Dialogs**
+  - [x] Add `OverlayState` enum in [`src/menu.h`](file:///home/kgorelov/git/doomlauncher/src/menu.h).
+  - [x] Implement F1 Help overlay.
+  - [x] Implement F3 Module Info dialog.
+  - [x] Implement F4 Engine Picker modal.
+  - [x] Implement F10 Quit confirmation.
 - [ ] **Step 5: State Persistence**
   - [ ] Implement `save_state()` / `load_state()` in [`src/config_module.cpp`](file:///home/kgorelov/git/doomlauncher/src/config_module.cpp).
   - [ ] Connect F2 in [`Menu::handleEvent`](file:///home/kgorelov/git/doomlauncher/src/menu.cpp) to persist settings.

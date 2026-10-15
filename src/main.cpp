@@ -93,9 +93,24 @@ int main(int argc, char* argv[]) {
 
     SDL_RWops* rw1 = SDL_RWFromConstMem(fonts_Doom2016Left_RpJDA_ttf, fonts_Doom2016Left_RpJDA_ttf_len);
     TTF_Font* font = TTF_OpenFontRW(rw1, 1, 84);
+    if (!font && fs::exists("fonts/Doom2016Left-RpJDA.ttf")) {
+        font = TTF_OpenFont("fonts/Doom2016Left-RpJDA.ttf", 84);
+    }
 
-    SDL_RWops* rw2 = SDL_RWFromConstMem(fonts_Doom2016Left_RpJDA_ttf, fonts_Doom2016Left_RpJDA_ttf_len);
-    TTF_Font* smallFont = TTF_OpenFontRW(rw2, 1, 24);
+    SDL_RWops* rwHud = SDL_RWFromConstMem(fonts_DoomClassicHUD_ttf, fonts_DoomClassicHUD_ttf_len);
+    TTF_Font* hudFont = TTF_OpenFontRW(rwHud, 1, 20);
+    if (!hudFont && fs::exists("fonts/DoomClassicHUD.ttf")) {
+        hudFont = TTF_OpenFont("fonts/DoomClassicHUD.ttf", 20);
+    }
+
+    SDL_RWops* rwMono = SDL_RWFromConstMem(fonts_Hack_Regular_ttf, fonts_Hack_Regular_ttf_len);
+    TTF_Font* monoFont = TTF_OpenFontRW(rwMono, 1, 20);
+    if (!monoFont && fs::exists("fonts/Hack-Regular.ttf")) {
+        monoFont = TTF_OpenFont("fonts/Hack-Regular.ttf", 20);
+    }
+
+    TTF_Font* smallFont = monoFont ? monoFont : hudFont;
+    TTF_Font* altSmallFont = (monoFont && hudFont) ? hudFont : nullptr;
 
     if (font == nullptr || smallFont == nullptr) {
         std::cerr << "Failed to load font! SDL_ttf Error: " << TTF_GetError() << std::endl;
@@ -109,6 +124,7 @@ int main(int argc, char* argv[]) {
     // Load config modules
     doomlauncher::ModuleRegistry registry;
     registry.load_user_config();
+    registry.load_state();
 
     if (!modulePaths.empty()) {
         for (const auto& path : modulePaths) {
@@ -121,6 +137,17 @@ int main(int argc, char* argv[]) {
             } else {
                 std::cerr << "Error: Specified path does not exist: " << path << std::endl;
             }
+        }
+    } else if (!registry.get_user_config().modules_path.empty()) {
+        std::string cfgMod = doomlauncher::AssetResolver::expand_path(registry.get_user_config().modules_path);
+        if (fs::is_directory(cfgMod)) {
+            std::cout << "Loading configured modules directory: " << cfgMod << std::endl;
+            registry.load_directory(cfgMod);
+        } else if (fs::exists(cfgMod)) {
+            std::cout << "Loading configured config file: " << cfgMod << std::endl;
+            registry.load_file(cfgMod);
+        } else {
+            std::cerr << "Warning: Configured modules path does not exist: " << cfgMod << std::endl;
         }
     } else {
         std::string configPath = "modules/main.toml";
@@ -138,7 +165,11 @@ int main(int argc, char* argv[]) {
     std::vector<doomlauncher::ResolvedMenuItem> resolvedItems = registry.resolve_menu_items();
     std::cout << "Resolved " << resolvedItems.size() << " menu item(s) from config." << std::endl;
 
-    Menu menu(renderer, font, smallFont, screenWidth, screenHeight);
+    Menu menu(renderer, font, smallFont, screenWidth, screenHeight, altSmallFont);
+    menu.setModuleRegistry(&registry);
+    if (registry.get_user_config().osd_font == "doom" || registry.get_user_config().osd_font == "classic") {
+        menu.setUseAlternateFont(true);
+    }
     menu.setMenuItems(resolvedItems);
 
     bool quit = false;
@@ -148,11 +179,6 @@ int main(int argc, char* argv[]) {
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) {
                 quit = true;
-            }
-            if (event.type == SDL_KEYDOWN) {
-                if (event.key.keysym.sym == SDLK_ESCAPE) {
-                    quit = true;
-                }
             }
             menu.handleEvent(event);
         }
@@ -178,7 +204,8 @@ int main(int argc, char* argv[]) {
     }
 
     if (font) TTF_CloseFont(font);
-    if (smallFont) TTF_CloseFont(smallFont);
+    if (hudFont) TTF_CloseFont(hudFont);
+    if (monoFont && monoFont != hudFont) TTF_CloseFont(monoFont);
 
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);

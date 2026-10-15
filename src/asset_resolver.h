@@ -11,6 +11,8 @@ struct UserConfig {
     std::vector<std::string> wad_dirs;
     std::unordered_map<std::string, std::string> iwads;
     std::string default_engine;
+    std::string modules_path;
+    std::string osd_font = "mono";
 };
 
 class AssetResolver {

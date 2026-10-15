@@ -1,4 +1,5 @@
 #include "config_module.h"
+#include "menu.h"
 #include "template_engine.h"
 #include <algorithm>
 #include <cassert>
@@ -994,6 +995,567 @@ requires_capability = ["vanilla"]
     std::cout << "Phase 6 Dynamic Template Generation Tests passed!" << std::endl << std::endl;
 }
 
+static void send_test_key(Menu& menu, SDL_Keycode sym) {
+    SDL_Event ev;
+    ev.type = SDL_KEYDOWN;
+    ev.key.keysym.sym = sym;
+    menu.handleEvent(ev);
+}
+
+void test_menu_paging() {
+    std::cout << "--- Running Menu Paging Tests ---" << std::endl;
+
+    Menu menu(nullptr, nullptr, nullptr, 800, 600);
+
+    // Create 15 items -> setMenuItems adds Quit -> 16 total items
+    std::vector<ResolvedMenuItem> items;
+    for (int i = 1; i <= 15; ++i) {
+        ResolvedMenuItem it;
+        it.title = "Test Game " + std::to_string(i);
+        it.module_name = "game_" + std::to_string(i);
+        items.push_back(it);
+    }
+    menu.setMenuItems(items);
+
+    assert(Menu::ITEMS_PER_PAGE == 6);
+    assert(menu.getTotalPages() == 3); // 16 items / 6 = 3 pages (6 + 6 + 4)
+    assert(menu.getCurrentPage() == 0);
+    assert(menu.getSelectedItem() == 0);
+
+    // 1. Test navigation with Down arrow across pages
+    for (int i = 0; i < 5; ++i) {
+        send_test_key(menu, SDLK_DOWN);
+    }
+    assert(menu.getSelectedItem() == 5);
+    assert(menu.getCurrentPage() == 0);
+
+    // 6th Down -> moves to index 6 (page 1)
+    send_test_key(menu, SDLK_DOWN);
+    assert(menu.getSelectedItem() == 6);
+    assert(menu.getCurrentPage() == 1);
+
+    // Down to end of page 1 (index 11)
+    for (int i = 0; i < 5; ++i) {
+        send_test_key(menu, SDLK_DOWN);
+    }
+    assert(menu.getSelectedItem() == 11);
+    assert(menu.getCurrentPage() == 1);
+
+    // Down to page 2 (index 12)
+    send_test_key(menu, SDLK_DOWN);
+    assert(menu.getSelectedItem() == 12);
+    assert(menu.getCurrentPage() == 2);
+
+    // Down to last item (index 15, Quit)
+    for (int i = 0; i < 3; ++i) {
+        send_test_key(menu, SDLK_DOWN);
+    }
+    assert(menu.getSelectedItem() == 15);
+    assert(menu.getCurrentPage() == 2);
+
+    // Down from last item -> wraps to item 0 (page 0)
+    send_test_key(menu, SDLK_DOWN);
+    assert(menu.getSelectedItem() == 0);
+    assert(menu.getCurrentPage() == 0);
+
+    // 2. Test navigation with Up arrow across pages (wrapping backwards)
+    send_test_key(menu, SDLK_UP);
+    assert(menu.getSelectedItem() == 15);
+    assert(menu.getCurrentPage() == 2);
+
+    // Up from index 6 (start of page 1) -> moves to index 5 (end of page 0)
+    menu.setMenuItems(items); // reset to index 0
+    for (int i = 0; i < 6; ++i) {
+        send_test_key(menu, SDLK_DOWN);
+    }
+    assert(menu.getSelectedItem() == 6);
+    assert(menu.getCurrentPage() == 1);
+    send_test_key(menu, SDLK_UP);
+    assert(menu.getSelectedItem() == 5);
+    assert(menu.getCurrentPage() == 0);
+
+    // 3. Test PageDown navigation
+    menu.setMenuItems(items); // cleanly reset to index 0
+    assert(menu.getSelectedItem() == 0);
+
+    send_test_key(menu, SDLK_PAGEDOWN); // page 0 -> page 1 (index 6)
+    assert(menu.getSelectedItem() == 6);
+    assert(menu.getCurrentPage() == 1);
+
+    send_test_key(menu, SDLK_PAGEDOWN); // page 1 -> page 2 (index 12)
+    assert(menu.getSelectedItem() == 12);
+    assert(menu.getCurrentPage() == 2);
+
+    send_test_key(menu, SDLK_PAGEDOWN); // on last page -> wraps to page 0
+    assert(menu.getSelectedItem() == 0);
+    assert(menu.getCurrentPage() == 0);
+
+    // 4. Test PageUp navigation
+    send_test_key(menu, SDLK_PAGEUP); // on page 0 -> wraps to last page (page 2, index 12)
+    assert(menu.getSelectedItem() == 12);
+    assert(menu.getCurrentPage() == 2);
+
+    send_test_key(menu, SDLK_PAGEUP); // page 2 -> page 1 (index 6)
+    assert(menu.getSelectedItem() == 6);
+    assert(menu.getCurrentPage() == 1);
+
+    send_test_key(menu, SDLK_PAGEUP); // page 1 -> page 0 (index 0)
+    assert(menu.getSelectedItem() == 0);
+    assert(menu.getCurrentPage() == 0);
+
+    std::cout << "Menu Paging Tests passed!" << std::endl << std::endl;
+}
+
+void test_menu_osd() {
+    std::cout << "--- Running Menu OSD Tests ---" << std::endl;
+    Menu menu(nullptr, nullptr, nullptr, 800, 600);
+
+    std::vector<doomlauncher::ResolvedMenuItem> items;
+    doomlauncher::ResolvedMenuItem it1;
+    it1.title = "Doom II";
+    it1.module_name = "doom2";
+    it1.status = doomlauncher::GameStatus::Ready;
+    it1.assets_found = true;
+
+    doomlauncher::EngineInfo eng1;
+    eng1.name = "boom";
+    eng1.title = "Boom";
+    eng1.cmd_template = "boom -iwad DOOM2.WAD";
+
+    doomlauncher::EngineInfo eng2;
+    eng2.name = "dsda";
+    eng2.title = "DSDA-Doom";
+    eng2.cmd_template = "dsda-doom -iwad DOOM2.WAD";
+
+    it1.compatible_engines = { eng1, eng2 };
+    it1.selected_engine_index = 0;
+    items.push_back(it1);
+
+    menu.setMenuItems(items);
+
+    assert(menu.getSelectedItem() == 0);
+    assert(menu.getMenuItems()[0].get_selected_engine()->name == "boom");
+
+    // Test status message setting and clearing
+    menu.setStatusMessage("Test status message");
+    assert(menu.getStatusMessage() == "Test status message");
+
+    // Right arrow switches engine and clears status message
+    send_test_key(menu, SDLK_RIGHT);
+    assert(menu.getMenuItems()[0].get_selected_engine()->name == "dsda");
+    assert(menu.getStatusMessage().empty());
+
+    // Left arrow switches back
+    send_test_key(menu, SDLK_LEFT);
+    assert(menu.getMenuItems()[0].get_selected_engine()->name == "boom");
+
+    // Test font toggling with alternate font (F9)
+    TTF_Font* dummyAlt = reinterpret_cast<TTF_Font*>(0x1234);
+    Menu menuWithAlt(nullptr, nullptr, nullptr, 800, 600, dummyAlt);
+    menuWithAlt.setMenuItems(items);
+    assert(!menuWithAlt.isUsingAlternateFont());
+    send_test_key(menuWithAlt, SDLK_F9);
+    assert(menuWithAlt.isUsingAlternateFont());
+    assert(menuWithAlt.getStatusMessage().find("Classic Doom") != std::string::npos);
+    send_test_key(menuWithAlt, SDLK_F9);
+    assert(!menuWithAlt.isUsingAlternateFont());
+    assert(menuWithAlt.getStatusMessage().find("Monospace") != std::string::npos);
+
+    // Ensure safe call to update/render with null fonts doesn't crash
+    menu.update();
+    menu.render();
+
+    std::cout << "Menu OSD Tests passed!" << std::endl << std::endl;
+}
+
+void test_menu_overlays() {
+    std::cout << "--- Running Menu Phase 4 Modal Overlays Tests ---" << std::endl;
+    Menu menu(nullptr, nullptr, nullptr, 800, 600);
+
+    std::vector<doomlauncher::ResolvedMenuItem> items;
+    doomlauncher::ResolvedMenuItem it1;
+    it1.title = "Doom II";
+    it1.module_name = "doom2";
+    it1.status = doomlauncher::GameStatus::Ready;
+    it1.assets_found = true;
+
+    doomlauncher::EngineInfo eng1;
+    eng1.name = "boom";
+    eng1.title = "Boom";
+    eng1.binary = "/usr/games/boom";
+    eng1.cmd_template = "{{BIN}} -iwad DOOM2.WAD";
+
+    doomlauncher::EngineInfo eng2;
+    eng2.name = "dsda";
+    eng2.title = "DSDA-Doom";
+    eng2.binary = "/usr/games/dsda-doom";
+    eng2.cmd_template = "{{BIN}} -iwad DOOM2.WAD";
+
+    it1.compatible_engines = { eng1, eng2 };
+    it1.selected_engine_index = 0;
+    it1.cmd = it1.get_command();
+    items.push_back(it1);
+
+    menu.setMenuItems(items);
+
+    // Initial state
+    assert(menu.getOverlayState() == OverlayState::None);
+
+    // 1. F1: Help Overlay
+    send_test_key(menu, SDLK_F1);
+    assert(menu.getOverlayState() == OverlayState::Help);
+    // Dismiss with Escape
+    send_test_key(menu, SDLK_ESCAPE);
+    assert(menu.getOverlayState() == OverlayState::None);
+    // Reopen with F1, close with F1
+    send_test_key(menu, SDLK_F1);
+    assert(menu.getOverlayState() == OverlayState::Help);
+    send_test_key(menu, SDLK_F1);
+    assert(menu.getOverlayState() == OverlayState::None);
+    // Reopen with F1, close with Enter
+    send_test_key(menu, SDLK_F1);
+    assert(menu.getOverlayState() == OverlayState::Help);
+    send_test_key(menu, SDLK_RETURN);
+    assert(menu.getOverlayState() == OverlayState::None);
+
+    // 2. F3: Selected Module Info
+    send_test_key(menu, SDLK_F3);
+    assert(menu.getOverlayState() == OverlayState::ModuleInfo);
+    // Dismiss with Escape
+    send_test_key(menu, SDLK_ESCAPE);
+    assert(menu.getOverlayState() == OverlayState::None);
+    // Reopen with F3, close with F3
+    send_test_key(menu, SDLK_F3);
+    assert(menu.getOverlayState() == OverlayState::ModuleInfo);
+    send_test_key(menu, SDLK_F3);
+    assert(menu.getOverlayState() == OverlayState::None);
+
+    // 3. F4: Engine Selection Modal
+    send_test_key(menu, SDLK_F4);
+    assert(menu.getOverlayState() == OverlayState::EngineSelect);
+    assert(menu.getModalCursorIndex() == 0);
+
+    // Navigate with Down arrow
+    send_test_key(menu, SDLK_DOWN);
+    assert(menu.getModalCursorIndex() == 1);
+    // Wrap around Down -> 0
+    send_test_key(menu, SDLK_DOWN);
+    assert(menu.getModalCursorIndex() == 0);
+    // Wrap around Up -> 1
+    send_test_key(menu, SDLK_UP);
+    assert(menu.getModalCursorIndex() == 1);
+
+    // Dismiss with Escape without applying changes
+    send_test_key(menu, SDLK_ESCAPE);
+    assert(menu.getOverlayState() == OverlayState::None);
+    assert(menu.getMenuItems()[0].selected_engine_index == 0);
+
+    // Reopen F4, navigate to index 1, confirm with Return
+    send_test_key(menu, SDLK_F4);
+    assert(menu.getOverlayState() == OverlayState::EngineSelect);
+    assert(menu.getModalCursorIndex() == 0);
+    send_test_key(menu, SDLK_DOWN);
+    assert(menu.getModalCursorIndex() == 1);
+    send_test_key(menu, SDLK_RETURN);
+    assert(menu.getOverlayState() == OverlayState::None);
+    assert(menu.getMenuItems()[0].selected_engine_index == 1);
+    assert(menu.getMenuItems()[0].get_selected_engine()->name == "dsda");
+    assert(menu.getStatusMessage().find("DSDA-Doom") != std::string::npos);
+
+    // 4. F10 / Esc: Fast Quit Confirmation
+    assert(!menu.isQuitSelected());
+    send_test_key(menu, SDLK_F10);
+    assert(menu.getOverlayState() == OverlayState::QuitConfirm);
+    // Press 'n' to cancel
+    send_test_key(menu, SDLK_n);
+    assert(menu.getOverlayState() == OverlayState::None);
+    assert(!menu.isQuitSelected());
+
+    // Press Escape on main menu triggers QuitConfirm
+    send_test_key(menu, SDLK_ESCAPE);
+    assert(menu.getOverlayState() == OverlayState::QuitConfirm);
+    // Press Escape again cancels QuitConfirm
+    send_test_key(menu, SDLK_ESCAPE);
+    assert(menu.getOverlayState() == OverlayState::None);
+    assert(!menu.isQuitSelected());
+
+    // Open with F10, press 'y' to confirm exit
+    send_test_key(menu, SDLK_F10);
+    assert(menu.getOverlayState() == OverlayState::QuitConfirm);
+    send_test_key(menu, SDLK_y);
+    assert(menu.getOverlayState() == OverlayState::None);
+    assert(menu.isQuitSelected());
+
+    // 5. Headless rendering safety with active overlays
+    menu.setOverlayState(OverlayState::Help);
+    menu.render();
+    menu.setOverlayState(OverlayState::ModuleInfo);
+    menu.render();
+    menu.setOverlayState(OverlayState::EngineSelect);
+    menu.render();
+    menu.setOverlayState(OverlayState::QuitConfirm);
+    menu.render();
+    menu.setOverlayState(OverlayState::None);
+    menu.render();
+
+    std::cout << "Menu Phase 4 Modal Overlays Tests passed!" << std::endl << std::endl;
+}
+
+void test_phase5_state_persistence() {
+    std::cout << "--- Running Phase 5 State Persistence Tests ---" << std::endl;
+    namespace fs = std::filesystem;
+
+    fs::path temp_state_file = "temp_test_state.toml";
+    std::error_code ec;
+    fs::remove(temp_state_file, ec);
+
+    // 1. Test basic save and load in ModuleRegistry
+    {
+        ModuleRegistry reg;
+        reg.set_saved_engine("doom2", "gzdoom");
+        reg.set_saved_engine("sigil", "boom");
+        assert(reg.save_state(temp_state_file.string()));
+        assert(fs::exists(temp_state_file));
+    }
+
+    {
+        ModuleRegistry reg2;
+        assert(reg2.load_state(temp_state_file.string()));
+        const auto& saved = reg2.get_saved_engines();
+        assert(saved.size() == 2);
+        assert(saved.at("doom2") == "gzdoom");
+        assert(saved.at("sigil") == "boom");
+    }
+
+    // 2. Test engine restoration during resolve_menu_items
+    fs::path temp_asset_dir = "temp_p5_assets";
+    fs::create_directories(temp_asset_dir, ec);
+    {
+        std::ofstream f(temp_asset_dir / "DOOM2.WAD");
+        f << "IWAD";
+    }
+
+    {
+        std::ofstream eng1_file("test_p5_boom.toml");
+        eng1_file << R"(
+[boom]
+type = "engine"
+title = "Boom Engine"
+binary = "sh"
+capabilities = ["vanilla", "boom"]
+cmd_template = "{{BIN}} -iwad {{IWAD}}"
+)";
+    }
+
+    {
+        std::ofstream eng2_file("test_p5_gzdoom.toml");
+        eng2_file << R"(
+[gzdoom]
+type = "engine"
+title = "GZDoom"
+binary = "sh"
+capabilities = ["vanilla", "boom", "gzdoom"]
+cmd_template = "{{BIN}} -iwad {{IWAD}}"
+)";
+    }
+
+    {
+        std::ofstream game_file("test_p5_game.toml");
+        game_file << R"(
+[doom2]
+type = "game"
+title = "Doom 2"
+iwad = "DOOM2.WAD"
+requires_capability = ["vanilla"]
+)";
+    }
+
+    {
+        ModuleRegistry reg;
+        reg.get_asset_resolver().add_search_dir(temp_asset_dir.string());
+        assert(reg.load_file("test_p5_boom.toml"));
+        assert(reg.load_file("test_p5_gzdoom.toml"));
+        assert(reg.load_file("test_p5_game.toml"));
+
+        // Default: first compatible engine is selected (boom)
+        auto items = reg.resolve_menu_items();
+        assert(items.size() == 1);
+        assert(items[0].get_selected_engine()->name == "boom");
+
+        // Now load state with doom2 = "gzdoom"
+        assert(reg.load_state(temp_state_file.string()));
+        auto items_with_state = reg.resolve_menu_items();
+        assert(items_with_state.size() == 1);
+        assert(items_with_state[0].get_selected_engine()->name == "gzdoom");
+    }
+
+    // 3. Test Menu F2 integration
+    {
+        Menu menu(nullptr, nullptr, nullptr, 800, 600);
+        ModuleRegistry reg;
+        reg.get_asset_resolver().add_search_dir(temp_asset_dir.string());
+        assert(reg.load_file("test_p5_boom.toml"));
+        assert(reg.load_file("test_p5_gzdoom.toml"));
+        assert(reg.load_file("test_p5_game.toml"));
+        assert(reg.load_state(temp_state_file.string()));
+
+        auto items = reg.resolve_menu_items();
+        menu.setMenuItems(items);
+        menu.setModuleRegistry(&reg);
+
+        // Initially gzdoom is selected
+        assert(menu.getMenuItems()[0].get_selected_engine()->name == "gzdoom");
+
+        // Switch to boom with Right arrow
+        send_test_key(menu, SDLK_RIGHT);
+        assert(menu.getMenuItems()[0].get_selected_engine()->name == "boom");
+
+        // Set custom state path via DOOMLAUNCHER_STATE env var to avoid overwriting real user state
+        fs::path f2_state_file = "temp_p5_f2_state.toml";
+        fs::remove(f2_state_file, ec);
+        setenv("DOOMLAUNCHER_STATE", f2_state_file.c_str(), 1);
+
+        // Press F2 to save settings
+        send_test_key(menu, SDLK_F2);
+        assert(menu.getStatusMessage().find("Settings saved to") != std::string::npos);
+        assert(fs::exists(f2_state_file));
+
+        // Verify the saved content in f2_state_file has doom2 = "boom"
+        ModuleRegistry reg_verify;
+        assert(reg_verify.load_state(f2_state_file.string()));
+        assert(reg_verify.get_saved_engines().at("doom2") == "boom");
+
+        unsetenv("DOOMLAUNCHER_STATE");
+        fs::remove(f2_state_file, ec);
+    }
+
+    // Clean up
+    fs::remove(temp_state_file, ec);
+    fs::remove_all(temp_asset_dir, ec);
+    std::remove("test_p5_boom.toml");
+    std::remove("test_p5_gzdoom.toml");
+    std::remove("test_p5_game.toml");
+
+    std::cout << "Phase 5 State Persistence Tests passed!" << std::endl << std::endl;
+}
+
+void test_gui_rendering_verification() {
+    std::cout << "--- Running Phase 6 Full GUI Rendering Verification Tests ---" << std::endl;
+    setenv("SDL_VIDEODRIVER", "dummy", 1);
+
+    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+        std::cerr << "Warning: SDL dummy video driver not available, skipping GUI rendering test." << std::endl;
+        return;
+    }
+    if (TTF_Init() == -1) {
+        std::cerr << "Warning: TTF_Init failed, skipping GUI rendering test." << std::endl;
+        SDL_Quit();
+        return;
+    }
+
+    SDL_Window* window = SDL_CreateWindow("Test", 0, 0, 800, 600, SDL_WINDOW_HIDDEN);
+    assert(window != nullptr);
+
+    SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
+    assert(renderer != nullptr);
+
+    TTF_Font* titleFont = TTF_OpenFont("fonts/Doom2016Left-RpJDA.ttf", 84);
+    TTF_Font* monoFont = TTF_OpenFont("fonts/Hack-Regular.ttf", 20);
+    TTF_Font* hudFont = TTF_OpenFont("fonts/DoomClassicHUD.ttf", 20);
+
+    assert(titleFont != nullptr);
+    assert(monoFont != nullptr);
+    assert(hudFont != nullptr);
+
+    Menu menu(renderer, titleFont, monoFont, 800, 600, hudFont);
+
+    // Create 8 items to test multi-page rendering
+    std::vector<ResolvedMenuItem> items;
+    for (int i = 1; i <= 8; ++i) {
+        ResolvedMenuItem item;
+        item.title = "Game " + std::to_string(i);
+        item.module_name = "game_" + std::to_string(i);
+        item.status = GameStatus::Ready;
+        item.assets_found = true;
+        item.resolved_iwad_path = "/path/to/DOOM2.WAD";
+        item.cmd = "engine -iwad DOOM2.WAD";
+
+        EngineInfo eng1;
+        eng1.name = "boom";
+        eng1.title = "Boom Engine";
+        eng1.binary = "/usr/games/boom";
+        eng1.installed_binary_path = "/usr/games/boom";
+        eng1.cmd_template = "{{BIN}} -iwad {{IWAD}}";
+
+        EngineInfo eng2;
+        eng2.name = "gzdoom";
+        eng2.title = "GZDoom";
+        eng2.binary = "/usr/games/gzdoom";
+        eng2.installed_binary_path = "/usr/games/gzdoom";
+        eng2.cmd_template = "{{BIN}} -iwad {{IWAD}}";
+
+        item.compatible_engines = { eng1, eng2 };
+        items.push_back(item);
+    }
+    menu.setMenuItems(items);
+
+    // 1. Render default main menu (page 0)
+    menu.render();
+
+    // 2. Render next page (page 1)
+    send_test_key(menu, SDLK_PAGEDOWN);
+    assert(menu.getCurrentPage() == 1);
+    menu.render();
+
+    // 3. Render Help overlay (F1)
+    send_test_key(menu, SDLK_F1);
+    assert(menu.getOverlayState() == OverlayState::Help);
+    menu.render();
+    send_test_key(menu, SDLK_ESCAPE);
+    assert(menu.getOverlayState() == OverlayState::None);
+
+    // 4. Render Module Info overlay (F3)
+    send_test_key(menu, SDLK_F3);
+    assert(menu.getOverlayState() == OverlayState::ModuleInfo);
+    menu.render();
+    send_test_key(menu, SDLK_ESCAPE);
+    assert(menu.getOverlayState() == OverlayState::None);
+
+    // 5. Render Engine Select overlay (F4)
+    send_test_key(menu, SDLK_F4);
+    assert(menu.getOverlayState() == OverlayState::EngineSelect);
+    menu.render();
+    send_test_key(menu, SDLK_ESCAPE);
+    assert(menu.getOverlayState() == OverlayState::None);
+
+    // 6. Render Quit Confirm overlay (F10)
+    send_test_key(menu, SDLK_F10);
+    assert(menu.getOverlayState() == OverlayState::QuitConfirm);
+    menu.render();
+    send_test_key(menu, SDLK_ESCAPE);
+    assert(menu.getOverlayState() == OverlayState::None);
+
+    // 7. Render font switch to Classic Doom HUD (F9)
+    send_test_key(menu, SDLK_F9);
+    assert(menu.isUsingAlternateFont());
+    menu.render();
+
+    // 8. Render save status message in OSD
+    menu.setStatusMessage("Settings saved to ~/.config/doomlauncher/state.toml");
+    menu.render();
+
+    // Clean up
+    TTF_CloseFont(titleFont);
+    TTF_CloseFont(monoFont);
+    TTF_CloseFont(hudFont);
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
+    TTF_Quit();
+    SDL_Quit();
+
+    std::cout << "Phase 6 Full GUI Rendering Verification Tests passed!" << std::endl << std::endl;
+}
+
 int main() {
     test_template_engine();
     test_module_registry();
@@ -1007,6 +1569,11 @@ int main() {
     test_phase6_asset_resolver();
     test_phase6_engine_capability_matching();
     test_phase6_dynamic_template_generation();
+    test_menu_paging();
+    test_menu_osd();
+    test_menu_overlays();
+    test_phase5_state_persistence();
+    test_gui_rendering_verification();
     std::cout << "ALL TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;
 }

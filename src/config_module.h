@@ -62,6 +62,18 @@ public:
     bool load_directory(const std::string& dirpath);
     bool load_user_config(const std::string& config_path = "");
 
+    bool load_state(const std::string& filepath = "");
+    bool save_state(const std::string& filepath = "") const;
+    bool save_state(const std::vector<ResolvedMenuItem>& items, const std::string& filepath = "");
+    bool save_state(const std::vector<ResolvedMenuItem>& items, std::string& out_saved_path, const std::string& filepath = "");
+
+    void set_saved_engine(const std::string& module_name, const std::string& engine_name);
+    const std::unordered_map<std::string, std::string>& get_saved_engines() const;
+    void apply_saved_state(std::vector<ResolvedMenuItem>& items) const;
+
+    static std::string get_default_state_path();
+    static bool save_state_from_items(const std::vector<ResolvedMenuItem>& items, std::string& out_saved_path, const std::string& filepath = "");
+
     void set_asset_resolver(const AssetResolver& resolver);
     AssetResolver& get_asset_resolver();
     const AssetResolver& get_asset_resolver() const;
@@ -81,6 +93,7 @@ public:
 
 private:
     std::unordered_map<std::string, Module> modules;
+    std::unordered_map<std::string, std::string> saved_engines;
     AssetResolver asset_resolver;
     EngineRegistry engine_registry;
     UserConfig user_config;

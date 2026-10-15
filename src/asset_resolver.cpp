@@ -204,6 +204,16 @@ UserConfig AssetResolver::load_config(const std::string& explicit_path) {
     }
 
     if (auto paths_tbl = tbl.get_as<toml::table>("paths")) {
+        if (auto node = paths_tbl->get("modules")) {
+            if (auto str = node->as_string()) {
+                config.modules_path = std::string(str->get());
+            }
+        } else if (auto node = paths_tbl->get("modules_path")) {
+            if (auto str = node->as_string()) {
+                config.modules_path = std::string(str->get());
+            }
+        }
+
         if (auto arr = paths_tbl->get_as<toml::array>("wad_dirs")) {
             for (const auto& elem : *arr) {
                 if (auto str = elem.as_string()) {
@@ -217,6 +227,11 @@ UserConfig AssetResolver::load_config(const std::string& explicit_path) {
         if (auto node = prefs_tbl->get("default_engine")) {
             if (auto str = node->as_string()) {
                 config.default_engine = std::string(str->get());
+            }
+        }
+        if (auto node = prefs_tbl->get("osd_font")) {
+            if (auto str = node->as_string()) {
+                config.osd_font = std::string(str->get());
             }
         }
     }

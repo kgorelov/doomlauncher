@@ -4,6 +4,7 @@
 #include "asset_resolver.h"
 #include "engine_registry.h"
 #include "template_engine.h"
+#include "wad_catalog.h"
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -86,6 +87,10 @@ public:
     AssetResolver& get_asset_resolver();
     const AssetResolver& get_asset_resolver() const;
 
+    void set_wad_catalog(const WadCatalog& catalog);
+    WadCatalog& get_wad_catalog();
+    const WadCatalog& get_wad_catalog() const;
+
     void set_engine_registry(const EngineRegistry& registry);
     EngineRegistry& get_engine_registry();
     const EngineRegistry& get_engine_registry() const;
@@ -103,6 +108,7 @@ private:
     std::unordered_map<std::string, Module> modules;
     std::unordered_map<std::string, std::string> saved_engines;
     AssetResolver asset_resolver;
+    WadCatalog wad_catalog;
     EngineRegistry engine_registry;
     UserConfig user_config;
 

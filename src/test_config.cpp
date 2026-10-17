@@ -3,6 +3,7 @@
 #include "template_engine.h"
 #include <algorithm>
 #include <cassert>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -1702,6 +1703,132 @@ requires_capability = ["vanilla"]
     std::cout << "Phase 1 Multi-Directory Modules & Centralized Saves Tests passed!" << std::endl << std::endl;
 }
 
+void test_phase2_wad_catalog_and_sha1() {
+    std::cout << "--- Running Phase 2 WAD Catalog, SHA-1 & Cache Persistence Tests ---" << std::endl;
+    namespace fs = std::filesystem;
+
+    // 1. Verify RFC 3174 SHA-1 test vectors
+    const char* vec_empty = "";
+    assert(WadCatalog::compute_bytes_sha1(reinterpret_cast<const uint8_t*>(vec_empty), 0) ==
+           "da39a3ee5e6b4b0d3255bfef95601890afd80709");
+
+    const char* vec_abc = "abc";
+    assert(WadCatalog::compute_bytes_sha1(reinterpret_cast<const uint8_t*>(vec_abc), 3) ==
+           "a9993e364706816aba3e25717850c26c9cd0d89d");
+
+    const char* vec_long = "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";
+    assert(WadCatalog::compute_bytes_sha1(reinterpret_cast<const uint8_t*>(vec_long), std::strlen(vec_long)) ==
+           "84983e441c3bd26ebaae4aa1f95129e5e54670f1");
+
+    // 2. Create mock WADs and test header inspection + SHA-1 indexing
+    fs::path wad_dir = "temp_p2_wads";
+    fs::path state_file = "temp_p2_state.toml";
+    fs::create_directories(wad_dir / "mods");
+
+    {
+        std::ofstream f(wad_dir / "z_custom.wad", std::ios::binary);
+        f << "PWAD_CUSTOM_CONTENT_12345";
+    }
+    {
+        std::ofstream f(wad_dir / "DOOM.WAD", std::ios::binary);
+        f << "IWAD_DOOM1_CONTENT_ABCDEF";
+    }
+    {
+        std::ofstream f(wad_dir / "DOOM2.WAD", std::ios::binary);
+        f << "IWAD_DOOM2_CONTENT_987654";
+    }
+    {
+        std::ofstream f(wad_dir / "mods" / "a_mod.wad", std::ios::binary);
+        f << "PWAD_AMOD_CONTENT_XYZ";
+    }
+    {
+        std::ofstream f(wad_dir / "custom_iwad.wad", std::ios::binary);
+        f << "IWAD_OTHER_GAME_CONTENT";
+    }
+
+    bool is_iwad = false;
+    assert(WadCatalog::inspect_wad_header((wad_dir / "DOOM2.WAD").string(), is_iwad) && is_iwad);
+    assert(WadCatalog::inspect_wad_header((wad_dir / "z_custom.wad").string(), is_iwad) && !is_iwad);
+
+    UserConfig cfg;
+    cfg.wad_dirs = { wad_dir.string() };
+    cfg.iwads["my_doom2_alias"] = (wad_dir / "DOOM2.WAD").string();
+
+    WadCatalog catalog;
+    catalog.scan_from_config(cfg, false);
+    assert(catalog.get_all_wads().size() == 5);
+
+    std::string doom2_sha1 = WadCatalog::compute_file_sha1((wad_dir / "DOOM2.WAD").string());
+    assert(doom2_sha1.size() == 40);
+
+    // Lookup by SHA-1 (case-insensitive)
+    std::string upper_sha1 = doom2_sha1;
+    std::transform(upper_sha1.begin(), upper_sha1.end(), upper_sha1.begin(), ::toupper);
+    const WadFile* by_sha1 = catalog.find_by_sha1(upper_sha1);
+    assert(by_sha1 != nullptr);
+    assert(by_sha1->filename == "DOOM2.WAD");
+
+    // Lookup by alias
+    const WadFile* by_alias = catalog.find_by_alias("my_doom2_alias");
+    assert(by_alias != nullptr);
+    assert(by_alias->sha1 == doom2_sha1);
+
+    // Lookup by filename (case-insensitive) and subdirectory
+    const WadFile* by_fn = catalog.find_by_filename("A_MOD.WAD");
+    assert(by_fn != nullptr);
+    assert(by_fn->filename == "a_mod.wad");
+
+    // resolve_wad prioritizes SHA-1 match even if filename differs
+    const WadFile* resolved = catalog.resolve_wad("renamed_or_different.wad", { doom2_sha1 });
+    assert(resolved != nullptr);
+    assert(resolved->filename == "DOOM2.WAD");
+
+    // 3. Test prioritized dependency list: DOOM2.WAD first, DOOM.WAD second, other IWADs next, PWADs last
+    std::vector<WadFile> deps = catalog.get_prioritized_dependency_wads();
+    assert(deps.size() == 5);
+    assert(deps[0].filename == "DOOM2.WAD");
+    assert(deps[1].filename == "DOOM.WAD");
+    assert(deps[2].filename == "custom_iwad.wad");
+    assert(deps[3].filename == "a_mod.wad");
+    assert(deps[4].filename == "z_custom.wad");
+
+    // 4. Test SHA-1 cache persistence in state.toml alongside [engines]
+    ModuleRegistry reg;
+    reg.set_saved_engine("doom2", "dsda-doom");
+    reg.set_wad_catalog(catalog);
+    assert(reg.save_state(state_file.string()));
+
+    ModuleRegistry reg_loaded;
+    assert(reg_loaded.load_state(state_file.string()));
+    assert(reg_loaded.get_saved_engines().at("doom2") == "dsda-doom");
+    assert(reg_loaded.get_wad_catalog().get_cache().size() == 5);
+
+    // Verify cache hit on second scan
+    reg_loaded.get_wad_catalog().scan_from_config(cfg, false);
+    const WadFile* cached_doom2 = reg_loaded.get_wad_catalog().find_by_filename("DOOM2.WAD");
+    assert(cached_doom2 != nullptr);
+    assert(cached_doom2->sha1 == doom2_sha1);
+
+    // Modify DOOM2.WAD size -> verify cache invalidates and recomputes new SHA-1
+    {
+        std::ofstream f(wad_dir / "DOOM2.WAD", std::ios::binary | std::ios::trunc);
+        f << "IWAD_DOOM2_MODIFIED_CONTENT_LONGER_STRING_99999";
+    }
+    std::string new_doom2_sha1 = WadCatalog::compute_file_sha1((wad_dir / "DOOM2.WAD").string());
+    assert(new_doom2_sha1 != doom2_sha1);
+
+    reg_loaded.get_wad_catalog().clear();
+    reg_loaded.get_wad_catalog().scan_from_config(cfg, false);
+    const WadFile* updated_doom2 = reg_loaded.get_wad_catalog().find_by_filename("DOOM2.WAD");
+    assert(updated_doom2 != nullptr);
+    assert(updated_doom2->sha1 == new_doom2_sha1);
+
+    fs::remove_all(wad_dir);
+    fs::remove(state_file);
+
+    std::cout << "Phase 2 WAD Catalog, SHA-1 & Cache Persistence Tests passed!" << std::endl << std::endl;
+}
+
 int main() {
     test_template_engine();
     test_module_registry();
@@ -1721,6 +1848,7 @@ int main() {
     test_phase5_state_persistence();
     test_gui_rendering_verification();
     test_phase1_multi_module_dirs_and_saves();
+    test_phase2_wad_catalog_and_sha1();
     std::cout << "ALL TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;
 }

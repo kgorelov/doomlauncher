@@ -383,9 +383,9 @@ enum class OverlayState {
   - [x] Remove legacy variable aliases and `{{MODULE_DIR}}` from `config_module.cpp`.
   - [x] Standardize `modules/engines/*.toml` and `modules/games/*.toml` (remove `savedir`).
   - [x] Route all save directories to `~/.config/doomlauncher/saves/<modulename>/` and auto-create on launch.
-- [ ] **Step 2: WAD Catalog & SHA-1 Engine**
-  - [ ] Implement `src/wad_catalog.h` and `src/wad_catalog.cpp` with built-in SHA-1 calculation and `[wad_cache]` in `state.toml`.
-  - [ ] Implement prioritized dependency list placing `doom2.wad` and `doom.wad` at the top.
+- [x] **Step 2: WAD Catalog & SHA-1 Engine**
+  - [x] Implement `src/wad_catalog.h` and `src/wad_catalog.cpp` with built-in SHA-1 calculation and `[wad_cache]` in `state.toml`.
+  - [x] Implement prioritized dependency list placing `doom2.wad` and `doom.wad` at the top.
 - [ ] **Step 3: WAD-Driven Module Activation**
   - [ ] Add `iwad_sha1` / `pwad_sha1` matching in `ModuleRegistry`.
   - [ ] Activate and display only modules whose WAD requirements are satisfied.

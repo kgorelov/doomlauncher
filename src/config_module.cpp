@@ -244,6 +244,18 @@ const AssetResolver& ModuleRegistry::get_asset_resolver() const {
     return asset_resolver;
 }
 
+void ModuleRegistry::set_wad_catalog(const WadCatalog& catalog) {
+    wad_catalog = catalog;
+}
+
+WadCatalog& ModuleRegistry::get_wad_catalog() {
+    return wad_catalog;
+}
+
+const WadCatalog& ModuleRegistry::get_wad_catalog() const {
+    return wad_catalog;
+}
+
 bool ModuleRegistry::load_user_config(const std::string& config_path) {
     user_config = AssetResolver::load_config(config_path);
     asset_resolver = AssetResolver(user_config);
@@ -305,6 +317,7 @@ bool ModuleRegistry::load_state(const std::string& filepath) {
                 }
             }
         }
+        wad_catalog.load_cache(resolved_path);
         return true;
     } catch (const toml::parse_error& err) {
         std::cerr << "Warning: Error parsing state file '" << resolved_path << "': " << err << std::endl;
@@ -344,6 +357,9 @@ bool ModuleRegistry::save_state(const std::string& filepath) const {
             return false;
         }
         out << tbl << "\n";
+        out.close();
+
+        wad_catalog.save_cache(resolved_path);
         return true;
     } catch (const std::exception& e) {
         std::cerr << "Warning: Failed to save state to '" << resolved_path << "': " << e.what() << std::endl;

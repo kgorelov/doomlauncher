@@ -4,8 +4,10 @@
 #include "config_module.h"
 #include <SDL.h>
 #include <SDL_ttf.h>
+#include <cstdint>
 #include <functional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 enum class OverlayState {
@@ -130,6 +132,44 @@ private:
     int formComplevelIndex = 0;
     int formCapabilityIndex = 0;
     int formFieldIndex = 0;
+
+    struct TextCacheKey {
+        TTF_Font* font;
+        std::string text;
+        Uint32 colorRGBA;
+
+        bool operator==(const TextCacheKey& other) const {
+            return font == other.font && colorRGBA == other.colorRGBA && text == other.text;
+        }
+    };
+
+    struct TextCacheKeyHash {
+        size_t operator()(const TextCacheKey& k) const {
+            size_t h1 = std::hash<const void*>{}(k.font);
+            size_t h2 = std::hash<std::string>{}(k.text);
+            size_t h3 = std::hash<Uint32>{}(k.colorRGBA);
+            size_t seed = h1;
+            seed ^= h2 + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+            seed ^= h3 + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+            return seed;
+        }
+    };
+
+    struct CachedText {
+        SDL_Texture* texture = nullptr;
+        int width = 0;
+        int height = 0;
+        uint64_t lastUsedTick = 0;
+    };
+
+    static constexpr size_t MAX_TEXT_CACHE_SIZE = 256;
+    std::unordered_map<TextCacheKey, CachedText, TextCacheKeyHash> textCache;
+    uint64_t cacheTick = 0;
+
+    const CachedText* getOrCreateTextTexture(TTF_Font* f, const std::string& text, SDL_Color color);
+    void getTextDimensions(TTF_Font* f, const std::string& text, SDL_Color color, int* outW, int* outH);
+    void pruneTextCache();
+    void clearTextCache();
 
     void confirmSelectedWads();
     void refreshMenuFromRegistry(const std::string& selectModuleName = "");

@@ -1617,6 +1617,25 @@ void test_gui_rendering_verification() {
     menu.setStatusMessage("Settings saved to ~/.config/doomlauncher/state.toml");
     menu.render();
 
+    // 9. Render AddWadDialog overlay (F5)
+    send_test_key(menu, SDLK_F5);
+    assert(menu.getOverlayState() == OverlayState::AddWadDialog);
+    menu.render();
+    send_test_key(menu, SDLK_ESCAPE);
+    assert(menu.getOverlayState() == OverlayState::None);
+
+    // 10. Render CreateModuleForm overlay
+    WadFile dummyWad;
+    dummyWad.path = "/path/to/eviternity.wad";
+    dummyWad.filename = "eviternity.wad";
+    dummyWad.stem_lower = "eviternity";
+    dummyWad.sha1 = "1234567890abcdef1234567890abcdef12345678";
+    menu.openCreateModuleForm({ dummyWad });
+    assert(menu.getOverlayState() == OverlayState::CreateModuleForm);
+    menu.render();
+    send_test_key(menu, SDLK_ESCAPE);
+    assert(menu.getOverlayState() == OverlayState::None);
+
     // Clean up
     TTF_CloseFont(titleFont);
     TTF_CloseFont(monoFont);
@@ -2184,6 +2203,208 @@ cmd = "{{BIN}} -iwad {{IWAD}} {% if COMPAT_LEVEL %}-complevel {{COMPAT_LEVEL}}{%
     std::cout << "Phase 4 Add WAD & Create Module UI Dialog Tests passed!" << std::endl << std::endl;
 }
 
+void test_phase5_end_to_end_verification() {
+    std::cout << "--- Running Phase 5 End-to-End WAD & Module Lifecycle Verification Tests ---" << std::endl;
+    namespace fs = std::filesystem;
+
+    fs::path test_root = "temp_p5_e2e_test";
+    fs::remove_all(test_root);
+    fs::path wad_dir = test_root / "wads";
+    fs::path sys_mods = test_root / "sys_mods";
+    fs::path usr_mods = test_root / "usr_mods";
+    fs::path cfg_file = test_root / "config.toml";
+    fs::path state_file = test_root / "state.toml";
+
+    fs::create_directories(wad_dir);
+    fs::create_directories(sys_mods / "engines");
+    fs::create_directories(sys_mods / "games");
+    fs::create_directories(usr_mods / "games");
+
+    // Create DOOM2.WAD, DOOM.WAD, a custom standalone IWAD (FREEDOOM2.WAD), and a multi-PWAD combo (sunlust.wad + sunlust_music.wad)
+    fs::path doom2_path = wad_dir / "DOOM2.WAD";
+    fs::path doom1_path = wad_dir / "DOOM.WAD";
+    fs::path freedoom_path = wad_dir / "freedoom2.wad";
+    fs::path sunlust_path = wad_dir / "sunlust.wad";
+    fs::path sunlust_mus_path = wad_dir / "sunlust_music.wad";
+
+    {
+        std::ofstream f(doom2_path, std::ios::binary);
+        f << "IWAD_DOOM2_E2E_BYTES";
+    }
+    {
+        std::ofstream f(doom1_path, std::ios::binary);
+        f << "IWAD_DOOM1_E2E_BYTES";
+    }
+    {
+        std::ofstream f(freedoom_path, std::ios::binary);
+        f << "IWAD_FREEDOOM2_E2E_BYTES";
+    }
+    {
+        std::ofstream f(sunlust_path, std::ios::binary);
+        f << "PWAD_SUNLUST_MAIN_E2E_BYTES";
+    }
+    {
+        std::ofstream f(sunlust_mus_path, std::ios::binary);
+        f << "PWAD_SUNLUST_MUSIC_E2E_BYTES";
+    }
+
+    std::string doom2_sha1 = WadCatalog::compute_file_sha1(doom2_path.string());
+    std::string doom1_sha1 = WadCatalog::compute_file_sha1(doom1_path.string());
+
+    {
+        std::ofstream f(sys_mods / "engines" / "dsda.toml");
+        f << R"TOML(
+[dsda-doom]
+type = "engine"
+title = "DSDA-Doom"
+binary = "sh"
+capabilities = ["vanilla", "limit-removing", "boom", "mbf", "mbf21", "complevel"]
+cmd = "{{BIN}} -iwad {{IWAD}} {% if COMPAT_LEVEL %}-complevel {{COMPAT_LEVEL}}{% endif %}{% if PWADS %}{% for wad in PWADS %} -file {{wad}}{% endfor %}{% endif %} -save {{SAVEDIR}}"
+)TOML";
+    }
+    {
+        std::ofstream f(sys_mods / "games" / "doom2.toml");
+        f << "[doom2]\n"
+          << "type = \"game\"\n"
+          << "title = \"Doom II: Hell on Earth\"\n"
+          << "iwad = \"DOOM2.WAD\"\n"
+          << "iwad_sha1 = [\"" << doom2_sha1 << "\"]\n"
+          << "compat_level = 2\n"
+          << "requires_capability = [\"vanilla\"]\n";
+    }
+    {
+        std::ofstream f(sys_mods / "games" / "doom1.toml");
+        f << "[doom]\n"
+          << "type = \"game\"\n"
+          << "title = \"The Ultimate Doom\"\n"
+          << "iwad = \"DOOM.WAD\"\n"
+          << "iwad_sha1 = [\"" << doom1_sha1 << "\"]\n"
+          << "compat_level = 3\n"
+          << "requires_capability = [\"vanilla\"]\n";
+    }
+
+    // Write initial config.toml
+    UserConfig initial_cfg;
+    initial_cfg.module_dirs = { sys_mods.string(), usr_mods.string() };
+    initial_cfg.default_engine = "dsda-doom";
+    assert(AssetResolver::save_config(initial_cfg, cfg_file.string()));
+
+    // Session 1: Load config, add DOOM.WAD + DOOM2.WAD, then multi-select sunlust.wad + sunlust_music.wad, then add standalone freedoom2.wad
+    {
+        ModuleRegistry reg;
+        reg.load_state(state_file.string());
+        assert(reg.load_user_config(cfg_file.string()));
+        reg.get_wad_catalog().clear();
+        reg.set_asset_resolver(AssetResolver());
+        assert(reg.load_configured_modules());
+
+        Menu menu(nullptr, nullptr, nullptr, 1024, 768);
+        menu.setModuleRegistry(&reg);
+        menu.setConfigSavePath(cfg_file.string());
+        menu.setUserModulesDir(usr_mods.string());
+        menu.setMenuItems(reg.resolve_menu_items());
+
+        auto sendKey = [&](SDL_Keycode sym) {
+            SDL_Event ev;
+            std::memset(&ev, 0, sizeof(ev));
+            ev.type = SDL_KEYDOWN;
+            ev.key.keysym.sym = sym;
+            menu.handleEvent(ev);
+        };
+
+        // 1. Multi-select DOOM.WAD and DOOM2.WAD in AddWadDialog using Space + A
+        menu.openAddWadDialog(wad_dir.string());
+        const auto& entries = menu.getBrowserEntries();
+        // Entries: [..], DOOM.WAD, DOOM2.WAD, freedoom2.wad, sunlust.wad, sunlust_music.wad
+        assert(entries.size() == 6);
+        menu.setBrowserCursorIndex(1); // DOOM.WAD
+        sendKey(SDLK_SPACE);
+        menu.setBrowserCursorIndex(2); // DOOM2.WAD
+        sendKey(SDLK_SPACE);
+        sendKey(SDLK_a);
+
+        assert(menu.getOverlayState() == OverlayState::None);
+        assert(menu.getMenuItems().size() == 3); // doom, doom2, quit
+
+        // 2. Multi-select sunlust.wad (index 4) and sunlust_music.wad (index 5) using Space + A -> opens CreateModuleForm
+        menu.openAddWadDialog(wad_dir.string());
+        menu.setBrowserCursorIndex(4); // sunlust.wad
+        sendKey(SDLK_SPACE);
+        menu.setBrowserCursorIndex(5); // sunlust_music.wad
+        sendKey(SDLK_SPACE);
+        sendKey(SDLK_a);
+
+        assert(menu.getOverlayState() == OverlayState::CreateModuleForm);
+        assert(menu.getFormTitle() == "Sunlust");
+        // Verify prioritized base WADs: DOOM2.WAD is first, DOOM.WAD is second
+        assert(menu.getFormBaseOptions().size() >= 2);
+        assert(menu.getFormBaseOptions()[0].wad.filename == "DOOM2.WAD");
+        assert(menu.getFormBaseOptions()[1].wad.filename == "DOOM.WAD");
+
+        // Set Complevel to 9 (Boom) (index 4) -> auto-sets capability to boom (index 2)
+        menu.setFormFieldIndex(3);
+        for (int i = 0; i < 4; ++i) sendKey(SDLK_RIGHT);
+        assert(menu.getFormComplevelIndex() == 4);
+        assert(menu.getFormCapabilityIndex() == 2);
+
+        // Save module with F2 shortcut
+        sendKey(SDLK_F2);
+        assert(menu.getOverlayState() == OverlayState::None);
+        assert(fs::exists(usr_mods / "games" / "sunlust.toml"));
+
+        // 3. Add standalone IWAD freedoom2.wad (index 3) -> CreateModuleForm offers (Standalone IWAD) at index 0!
+        menu.openAddWadDialog(wad_dir.string());
+        menu.setBrowserCursorIndex(3); // freedoom2.wad
+        sendKey(SDLK_RETURN);
+
+        assert(menu.getOverlayState() == OverlayState::CreateModuleForm);
+        assert(!menu.getFormBaseOptions().empty());
+        assert(menu.getFormBaseOptions()[0].is_standalone);
+        sendKey(SDLK_F2);
+        assert(menu.getOverlayState() == OverlayState::None);
+        assert(fs::exists(usr_mods / "games" / "freedoom2.toml"));
+
+        // Save state (including WAD SHA-1 cache and engine selections)
+        std::string savedStatePath;
+        assert(reg.save_state(menu.getMenuItems(), savedStatePath, state_file.string()));
+    }
+
+    // Session 2: Simulate fresh restart of Doom Launcher loading config.toml, state.toml, and usr_mods/games/*.toml
+    {
+        ModuleRegistry reg2;
+        assert(reg2.load_state(state_file.string()));
+        assert(reg2.load_user_config(cfg_file.string()));
+        assert(reg2.load_configured_modules());
+
+        auto items = reg2.resolve_menu_items();
+        // Should have 4 active games: doom, doom2, sunlust, freedoom2
+        assert(items.size() == 4);
+
+        bool found_sunlust = false;
+        bool found_freedoom = false;
+        for (const auto& item : items) {
+            if (item.module_name == "sunlust") {
+                found_sunlust = true;
+                assert(item.resolved_pwad_paths.size() == 2);
+                assert(item.cmd.find("-complevel 9") != std::string::npos);
+                assert(item.cmd.find("sunlust.wad") != std::string::npos);
+                assert(item.cmd.find("sunlust_music.wad") != std::string::npos);
+                assert(item.cmd.find("-save " + ModuleRegistry::get_module_save_dir("sunlust")) != std::string::npos);
+            } else if (item.module_name == "freedoom2") {
+                found_freedoom = true;
+                assert(item.resolved_iwad_path.find("freedoom2.wad") != std::string::npos);
+                assert(item.resolved_pwad_paths.empty());
+            }
+        }
+        assert(found_sunlust);
+        assert(found_freedoom);
+    }
+
+    fs::remove_all(test_root);
+
+    std::cout << "Phase 5 End-to-End WAD & Module Lifecycle Verification Tests passed!" << std::endl << std::endl;
+}
+
 int main() {
     test_template_engine();
     test_module_registry();
@@ -2206,6 +2427,7 @@ int main() {
     test_phase2_wad_catalog_and_sha1();
     test_phase3_wad_driven_module_activation();
     test_phase4_add_wad_and_create_module_dialogs();
+    test_phase5_end_to_end_verification();
     std::cout << "ALL TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;
 }

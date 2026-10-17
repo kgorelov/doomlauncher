@@ -2032,6 +2032,158 @@ cmd = "{{BIN}} -iwad {{IWAD}} {% if COMPAT_LEVEL %}-complevel {{COMPAT_LEVEL}}{%
     std::cout << "Phase 3 WAD-Driven Module Activation & User Module Creation Tests passed!" << std::endl << std::endl;
 }
 
+void test_phase4_add_wad_and_create_module_dialogs() {
+    std::cout << "--- Running Phase 4 Add WAD & Create Module UI Dialog Tests ---" << std::endl;
+    namespace fs = std::filesystem;
+
+    fs::path test_root = "temp_p4_ui_test";
+    fs::remove_all(test_root);
+    fs::path wad_dir = test_root / "wads";
+    fs::path sys_mods = test_root / "sys_mods";
+    fs::path usr_mods = test_root / "usr_mods";
+    fs::path cfg_file = test_root / "config.toml";
+    fs::create_directories(wad_dir / "subdir");
+    fs::create_directories(sys_mods / "engines");
+    fs::create_directories(sys_mods / "games");
+    fs::create_directories(usr_mods / "games");
+
+    fs::path doom2_path = wad_dir / "DOOM2.WAD";
+    fs::path evit_path = wad_dir / "eviternity.wad";
+    {
+        std::ofstream f(doom2_path, std::ios::binary);
+        f << "IWAD_DOOM2_PHASE4_TEST_CONTENT";
+    }
+    {
+        std::ofstream f(evit_path, std::ios::binary);
+        f << "PWAD_EVITERNITY_PHASE4_TEST_CONTENT";
+    }
+
+    std::string doom2_sha1 = WadCatalog::compute_file_sha1(doom2_path.string());
+
+    {
+        std::ofstream f(sys_mods / "engines" / "dsda.toml");
+        f << R"TOML(
+[dsda-doom]
+type = "engine"
+title = "DSDA-Doom"
+binary = "sh"
+capabilities = ["vanilla", "boom", "mbf", "mbf21"]
+cmd = "{{BIN}} -iwad {{IWAD}} {% if COMPAT_LEVEL %}-complevel {{COMPAT_LEVEL}}{% endif %}{% if PWADS %}{% for wad in PWADS %} -file {{wad}}{% endfor %}{% endif %} -savedir {{SAVEDIR}}"
+)TOML";
+    }
+    {
+        std::ofstream f(sys_mods / "games" / "doom2.toml");
+        f << "[doom2]\n"
+          << "type = \"game\"\n"
+          << "title = \"Doom II: Hell on Earth\"\n"
+          << "iwad = \"DOOM2.WAD\"\n"
+          << "iwad_sha1 = [\"" << doom2_sha1 << "\"]\n"
+          << "compat_level = 2\n"
+          << "requires_capability = [\"vanilla\"]\n";
+    }
+
+    UserConfig cfg;
+    cfg.module_dirs = { sys_mods.string(), usr_mods.string() };
+    cfg.default_engine = "dsda-doom";
+
+    ModuleRegistry reg;
+    reg.set_user_config(cfg);
+    reg.get_wad_catalog().clear();
+    reg.set_asset_resolver(AssetResolver());
+    assert(reg.load_configured_modules());
+
+    Menu menu(nullptr, nullptr, nullptr, 1024, 768);
+    menu.setModuleRegistry(&reg);
+    menu.setConfigSavePath(cfg_file.string());
+    menu.setUserModulesDir(usr_mods.string());
+    menu.setMenuItems(reg.resolve_menu_items());
+
+    // Initially only "Quit" is in the menu (0 active games)
+    assert(menu.getMenuItems().size() == 1);
+    assert(menu.getMenuItems()[0].module_name == "quit");
+
+    auto sendKey = [&](SDL_Keycode sym) {
+        SDL_Event ev;
+        std::memset(&ev, 0, sizeof(ev));
+        ev.type = SDL_KEYDOWN;
+        ev.key.keysym.sym = sym;
+        menu.handleEvent(ev);
+    };
+
+    auto sendText = [&](const char* txt) {
+        SDL_Event ev;
+        std::memset(&ev, 0, sizeof(ev));
+        ev.type = SDL_TEXTINPUT;
+        std::strncpy(ev.text.text, txt, sizeof(ev.text.text) - 1);
+        menu.handleEvent(ev);
+    };
+
+    // 1. Open AddWadDialog via F5 and load wad_dir
+    sendKey(SDLK_F5);
+    assert(menu.getOverlayState() == OverlayState::AddWadDialog);
+    menu.loadBrowserDirectory(wad_dir.string());
+
+    const auto& entries = menu.getBrowserEntries();
+    // Should contain [..], subdir/, DOOM2.WAD, eviternity.wad
+    assert(entries.size() == 4);
+    assert(entries[0].is_parent);
+    assert(entries[1].is_dir && entries[1].name == "subdir/");
+    assert(!entries[2].is_dir && entries[2].name == "DOOM2.WAD");
+    assert(!entries[3].is_dir && entries[3].name == "eviternity.wad");
+
+    // 2. Navigate down to DOOM2.WAD (index 2) and press Enter -> activates existing module 'doom2'!
+    sendKey(SDLK_DOWN); // index 1 (subdir/)
+    sendKey(SDLK_DOWN); // index 2 (DOOM2.WAD)
+    assert(menu.getBrowserCursorIndex() == 2);
+    sendKey(SDLK_RETURN);
+
+    assert(menu.getOverlayState() == OverlayState::None);
+    assert(menu.getMenuItems().size() == 2); // doom2 + quit
+    assert(menu.getMenuItems()[menu.getSelectedItem()].module_name == "doom2");
+    assert(menu.getStatusMessage().find("Activated module: Doom II: Hell on Earth") != std::string::npos);
+    assert(fs::exists(cfg_file));
+
+    // 3. Press F5 again, select eviternity.wad (index 3), press Enter -> opens CreateModuleForm!
+    sendKey(SDLK_F5);
+    assert(menu.getOverlayState() == OverlayState::AddWadDialog);
+    menu.setBrowserCursorIndex(3); // eviternity.wad
+    sendKey(SDLK_RETURN);
+
+    assert(menu.getOverlayState() == OverlayState::CreateModuleForm);
+    assert(menu.getFormTitle() == "Eviternity");
+    assert(!menu.getFormBaseOptions().empty());
+    // DOOM2.WAD should be prioritized at index 0
+    assert(menu.getFormBaseOptions()[0].wad.filename == "DOOM2.WAD");
+    assert(menu.getFormBaseOptions()[0].base_game_module == "doom2");
+
+    // Edit title via Backspace + TextInput ("Eviternity" -> "Eviternity RC1")
+    sendText(" RC1");
+    assert(menu.getFormTitle() == "Eviternity RC1");
+
+    // Move to Complevel field (field 3) and cycle Right to '11 (MBF)' (index 5)
+    menu.setFormFieldIndex(3);
+    for (int i = 0; i < 5; ++i) {
+        sendKey(SDLK_RIGHT);
+    }
+    assert(menu.getFormComplevelIndex() == 5); // 11 (MBF)
+    assert(menu.getFormCapabilityIndex() == 3); // mbf
+
+    // Move to Save button (field 5) and press Enter -> creates usr_mods/games/eviternity_rc1.toml & activates!
+    menu.setFormFieldIndex(5);
+    sendKey(SDLK_RETURN);
+
+    assert(menu.getOverlayState() == OverlayState::None);
+    assert(fs::exists(usr_mods / "games" / "eviternity_rc1.toml"));
+    assert(menu.getMenuItems().size() == 3); // doom2, eviternity_rc1, quit
+    assert(menu.getMenuItems()[menu.getSelectedItem()].module_name == "eviternity_rc1");
+    assert(menu.getMenuItems()[menu.getSelectedItem()].title == "Eviternity RC1");
+    assert(menu.getStatusMessage().find("Created & activated module: Eviternity RC1") != std::string::npos);
+
+    fs::remove_all(test_root);
+
+    std::cout << "Phase 4 Add WAD & Create Module UI Dialog Tests passed!" << std::endl << std::endl;
+}
+
 int main() {
     test_template_engine();
     test_module_registry();
@@ -2053,6 +2205,7 @@ int main() {
     test_phase1_multi_module_dirs_and_saves();
     test_phase2_wad_catalog_and_sha1();
     test_phase3_wad_driven_module_activation();
+    test_phase4_add_wad_and_create_module_dialogs();
     std::cout << "ALL TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;
 }

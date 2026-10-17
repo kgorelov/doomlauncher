@@ -390,10 +390,10 @@ enum class OverlayState {
   - [x] Add `iwad_sha1` / `pwad_sha1` matching in `ModuleRegistry`.
   - [x] Activate and display only modules whose WAD requirements are satisfied.
   - [x] Implement `ModuleRegistry::create_user_module()` saving to `~/.config/doomlauncher/modules/games/`.
-- [ ] **Step 4: "Add WAD" & "Create Module" UI**
-  - [ ] Implement `OverlayState::AddWadDialog` (F5 filesystem browser with multi-WAD selection).
-  - [ ] Implement `OverlayState::CreateModuleForm` (interactive dialog for unmatched WADs).
-  - [ ] Update F1 Help and OSD hints with `F5: Add WAD`.
-- [ ] **Step 5: Testing & Build Verification**
-  - [ ] Update unit tests in `src/test_config.cpp` for the simplified schema, SHA-1 matching, module activation, save dirs, and module creation.
-  - [ ] Verify clean compilation with `-Wall -Wextra` and 100% test pass rate.
+- [x] **Step 4: "Add WAD" & "Create Module" UI**
+  - [x] Implement `OverlayState::AddWadDialog` (F5 filesystem browser with multi-WAD selection).
+  - [x] Implement `OverlayState::CreateModuleForm` (interactive dialog for unmatched WADs).
+  - [x] Update F1 Help and OSD hints with `F5: Add WAD`.
+- [x] **Step 5: Testing & Build Verification**
+  - [x] Update unit tests in `src/test_config.cpp` for the simplified schema, SHA-1 matching, module activation, save dirs, and module creation.
+  - [x] Verify clean compilation with `-Wall -Wextra` and 100% test pass rate.

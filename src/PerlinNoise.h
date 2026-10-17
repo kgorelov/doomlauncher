@@ -9,27 +9,23 @@
 
 class PerlinNoise {
 public:
-    PerlinNoise() {
-        p.resize(256);
-        std::iota(p.begin(), p.end(), 0);
-        std::default_random_engine engine(std::random_device{}());
-        std::shuffle(p.begin(), p.end(), engine);
-        p.insert(p.end(), p.begin(), p.end());
+    PerlinNoise() : PerlinNoise(std::random_device{}()) {
     }
 
     PerlinNoise(unsigned int seed) {
-        p.resize(256);
-        std::iota(p.begin(), p.end(), 0);
+        std::iota(p, p + 256, 0);
         std::default_random_engine engine(seed);
-        std::shuffle(p.begin(), p.end(), engine);
-        p.insert(p.end(), p.begin(), p.end());
+        std::shuffle(p, p + 256, engine);
+        std::copy(p, p + 256, p + 256);
     }
 
-    double noise(double x, double y) {
-        int X = static_cast<int>(std::floor(x)) & 255;
-        int Y = static_cast<int>(std::floor(y)) & 255;
-        x -= std::floor(x);
-        y -= std::floor(y);
+    double noise(double x, double y) const {
+        double fx = std::floor(x);
+        double fy = std::floor(y);
+        int X = static_cast<int>(fx) & 255;
+        int Y = static_cast<int>(fy) & 255;
+        x -= fx;
+        y -= fy;
         double u = fade(x);
         double v = fade(y);
         int A = p[X] + Y;
@@ -38,25 +34,24 @@ public:
         int B = p[X + 1] + Y;
         int BA = p[B];
         int BB = p[B + 1];
-        double res = lerp(v, lerp(u, grad(AA, x, y),
-                                     grad(BA, x - 1, y)),
-                             lerp(u, grad(AB, x, y - 1),
-                                     grad(BB, x - 1, y - 1)));
-        return res;
+        return lerp(v, lerp(u, grad(AA, x, y),
+                               grad(BA, x - 1, y)),
+                       lerp(u, grad(AB, x, y - 1),
+                               grad(BB, x - 1, y - 1)));
     }
 
 private:
-    std::vector<int> p;
+    int p[512];
 
-    double fade(double t) {
+    static double fade(double t) {
         return t * t * t * (t * (t * 6 - 15) + 10);
     }
 
-    double lerp(double t, double a, double b) {
+    static double lerp(double t, double a, double b) {
         return a + t * (b - a);
     }
 
-    double grad(int hash, double x, double y) {
+    static double grad(int hash, double x, double y) {
         int h = hash & 15;
         double u = h < 8 ? x : y;
         double v = h < 4 ? y : h == 12 || h == 14 ? x : 0;

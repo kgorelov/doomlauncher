@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.10)
 project(DoomLauncher)
 
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
+endif()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -44,4 +48,5 @@ add_executable(test_config
     src/menu.cpp
 )
 
+target_compile_options(test_config PRIVATE -UNDEBUG)
 target_link_libraries(test_config PUBLIC ${SDL2_LIBRARY} ${SDL2_TTF_LIBRARY})

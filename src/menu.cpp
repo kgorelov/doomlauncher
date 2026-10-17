@@ -91,6 +91,7 @@ Menu::Menu(SDL_Renderer* renderer, TTF_Font* font, TTF_Font* smallFont, int scre
 }
 
 Menu::~Menu() {
+    clearTextCache();
 }
 
 void Menu::toggleOsdFont() {
@@ -101,6 +102,11 @@ void Menu::toggleOsdFont() {
 
 void Menu::setMenuItems(const std::vector<doomlauncher::ResolvedMenuItem>& items) {
     menuItems = items;
+    for (auto& item : menuItems) {
+        if (item.cmd.empty() && !item.compatible_engines.empty()) {
+            item.cmd = item.get_command();
+        }
+    }
 
     doomlauncher::ResolvedMenuItem quit_item;
     quit_item.title = "Quit";
@@ -763,6 +769,8 @@ void Menu::update() {
 void Menu::render() {
     if (menuItems.empty()) return;
 
+    ++cacheTick;
+
     SDL_Color white = { 255, 255, 255, 255 };
     SDL_Color red = { 255, 0, 0, 255 };
     SDL_Color yellow = { 255, 255, 0, 255 };
@@ -808,8 +816,7 @@ void Menu::render() {
 
         int slotIndex = i - pageStartIndex;
         int y = startY + slotIndex * itemSpacing;
-        std::string displayText = item.title;
-        renderText(font, displayText, 0, y, color, true);
+        renderText(font, item.title, 0, y, color, true);
     }
 
     // Render page indicator under menu
@@ -873,8 +880,7 @@ void Menu::render() {
             }
             line1Color = yellow;
 
-            std::string cmd = item.get_command();
-            if (cmd.empty()) cmd = item.cmd;
+            const std::string& cmd = !item.cmd.empty() ? item.cmd : item.get_command();
             line2 = "CMD: " + cmd;
             line2Color = white;
 
@@ -918,40 +924,109 @@ void Menu::render() {
                 break;
         }
     }
+
+    if (textCache.size() > MAX_TEXT_CACHE_SIZE) {
+        pruneTextCache();
+    }
 }
 
 bool Menu::isQuitSelected() const {
     return quitSelected;
 }
 
-void Menu::renderText(TTF_Font* f, const std::string& text, int x, int y, SDL_Color color, bool centered, int maxAllowedWidth) {
-    if (!renderer || !f || text.empty()) return;
+const Menu::CachedText* Menu::getOrCreateTextTexture(TTF_Font* f, const std::string& text, SDL_Color color) {
+    if (!renderer || !f || text.empty()) return nullptr;
+
+    Uint32 rgba = (static_cast<Uint32>(color.r) << 24) |
+                  (static_cast<Uint32>(color.g) << 16) |
+                  (static_cast<Uint32>(color.b) << 8) |
+                  static_cast<Uint32>(color.a);
+    TextCacheKey key{ f, text, rgba };
+
+    auto it = textCache.find(key);
+    if (it != textCache.end()) {
+        it->second.lastUsedTick = cacheTick;
+        return &it->second;
+    }
 
     SDL_Surface* surface = TTF_RenderText_Solid(f, text.c_str(), color);
     if (surface == nullptr) {
         std::cerr << "Unable to render text surface! SDL_ttf Error: " << TTF_GetError() << std::endl;
-        return;
+        return nullptr;
     }
 
     SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+    int w = surface->w;
+    int h = surface->h;
+    SDL_FreeSurface(surface);
+
     if (texture == nullptr) {
         std::cerr << "Unable to create texture from rendered text! SDL Error: " << SDL_GetError() << std::endl;
-    } else {
-        int textWidth = surface->w;
-        int finalX = centered ? (screenWidth - textWidth) / 2 : x;
-        int maxW = (maxAllowedWidth > 0) ? maxAllowedWidth : (screenWidth - finalX - 10);
-        if (maxW > 0 && surface->w > maxW) {
-            SDL_Rect srcRect = { 0, 0, maxW, surface->h };
-            SDL_Rect renderQuad = { finalX, y, maxW, surface->h };
-            SDL_RenderCopy(renderer, texture, &srcRect, &renderQuad);
-        } else {
-            SDL_Rect renderQuad = { finalX, y, surface->w, surface->h };
-            SDL_RenderCopy(renderer, texture, nullptr, &renderQuad);
-        }
-        SDL_DestroyTexture(texture);
+        return nullptr;
     }
 
-    SDL_FreeSurface(surface);
+    CachedText entry;
+    entry.texture = texture;
+    entry.width = w;
+    entry.height = h;
+    entry.lastUsedTick = cacheTick;
+
+    auto [ins_it, _] = textCache.emplace(std::move(key), entry);
+    return &ins_it->second;
+}
+
+void Menu::getTextDimensions(TTF_Font* f, const std::string& text, SDL_Color color, int* outW, int* outH) {
+    if (outW) *outW = 0;
+    if (outH) *outH = 0;
+    if (!f || text.empty()) return;
+
+    if (const CachedText* cached = getOrCreateTextTexture(f, text, color)) {
+        if (outW) *outW = cached->width;
+        if (outH) *outH = cached->height;
+    } else {
+        TTF_SizeText(f, text.c_str(), outW, outH);
+    }
+}
+
+void Menu::pruneTextCache() {
+    for (auto it = textCache.begin(); it != textCache.end(); ) {
+        if (it->second.lastUsedTick < cacheTick) {
+            if (it->second.texture) {
+                SDL_DestroyTexture(it->second.texture);
+            }
+            it = textCache.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+void Menu::clearTextCache() {
+    for (auto& [_, entry] : textCache) {
+        if (entry.texture) {
+            SDL_DestroyTexture(entry.texture);
+            entry.texture = nullptr;
+        }
+    }
+    textCache.clear();
+}
+
+void Menu::renderText(TTF_Font* f, const std::string& text, int x, int y, SDL_Color color, bool centered, int maxAllowedWidth) {
+    const CachedText* cached = getOrCreateTextTexture(f, text, color);
+    if (!cached || !cached->texture) return;
+
+    int textWidth = cached->width;
+    int textHeight = cached->height;
+    int finalX = centered ? (screenWidth - textWidth) / 2 : x;
+    int maxW = (maxAllowedWidth > 0) ? maxAllowedWidth : (screenWidth - finalX - 10);
+    if (maxW > 0 && textWidth > maxW) {
+        SDL_Rect srcRect = { 0, 0, maxW, textHeight };
+        SDL_Rect renderQuad = { finalX, y, maxW, textHeight };
+        SDL_RenderCopy(renderer, cached->texture, &srcRect, &renderQuad);
+    } else {
+        SDL_Rect renderQuad = { finalX, y, textWidth, textHeight };
+        SDL_RenderCopy(renderer, cached->texture, nullptr, &renderQuad);
+    }
 }
 
 void Menu::renderDialogBox(int x, int y, int w, int h, const std::string& title, TTF_Font* osdFont) {
@@ -979,11 +1054,11 @@ void Menu::renderDialogBox(int x, int y, int w, int h, const std::string& title,
 
     // Header divider line and title if provided
     if (!title.empty()) {
+        SDL_Color yellow = { 255, 255, 0, 255 };
         int titleW = 0, titleH = 0;
-        TTF_SizeText(osdFont, title.c_str(), &titleW, &titleH);
+        getTextDimensions(osdFont, title, yellow, &titleW, &titleH);
         int titleX = x + (w - titleW) / 2;
         int titleY = y + 10;
-        SDL_Color yellow = { 255, 255, 0, 255 };
         renderText(osdFont, title, titleX, titleY, yellow, false, w - 20);
 
         int sepY = y + (titleH > 0 ? titleH : 24) + 14;
@@ -1005,11 +1080,11 @@ void Menu::renderHelpOverlay(TTF_Font* osdFont) {
     renderDialogBox(x, y, w, h, "=== DOOM LAUNCHER CONTROLS ===", osdFont);
 
     struct HelpRow {
-        std::string key;
-        std::string desc;
+        const char* key;
+        const char* desc;
     };
 
-    std::vector<HelpRow> rows = {
+    static constexpr HelpRow kHelpRows[] = {
         { "Up / Down",           "Navigate games / options" },
         { "PageUp / PageDown",   "Switch menu page" },
         { "Left / Right",        "Quick engine toggle" },
@@ -1022,6 +1097,7 @@ void Menu::renderHelpOverlay(TTF_Font* osdFont) {
         { "F9",                  "Toggle OSD font (Mono / Doom HUD)" },
         { "F10 / Esc",           "Fast quit launcher / Back" }
     };
+    constexpr size_t kNumHelpRows = sizeof(kHelpRows) / sizeof(kHelpRows[0]);
 
     SDL_Color colKey = { 255, 255, 0, 255 };
     SDL_Color colDesc = { 220, 220, 220, 255 };
@@ -1030,15 +1106,15 @@ void Menu::renderHelpOverlay(TTF_Font* osdFont) {
     int startY = y + 48;
     int rowSpacing = 31;
 
-    for (size_t i = 0; i < rows.size(); ++i) {
+    for (size_t i = 0; i < kNumHelpRows; ++i) {
         int curY = startY + static_cast<int>(i) * rowSpacing;
-        renderText(osdFont, rows[i].key, x + 35, curY, colKey, false, 190);
-        renderText(osdFont, rows[i].desc, x + 235, curY, colDesc, false, w - 255);
+        renderText(osdFont, kHelpRows[i].key, x + 35, curY, colKey, false, 190);
+        renderText(osdFont, kHelpRows[i].desc, x + 235, curY, colDesc, false, w - 255);
     }
 
     std::string footer = "[ Press F1, Esc, or Enter to Close ]";
     int footW = 0;
-    TTF_SizeText(osdFont, footer.c_str(), &footW, nullptr);
+    getTextDimensions(osdFont, footer, colFoot, &footW, nullptr);
     renderText(osdFont, footer, x + (w - footW) / 2, y + h - 35, colFoot, false);
 }
 
@@ -1148,17 +1224,16 @@ void Menu::renderModuleInfoOverlay(TTF_Font* osdFont) {
         activeEngineStr = "None";
     }
 
-    std::string cmdStr = item.get_command();
-    if (cmdStr.empty()) cmdStr = item.cmd;
+    std::string cmdStr = !item.cmd.empty() ? item.cmd : item.get_command();
     if (cmdStr.empty()) cmdStr = "(None)";
 
     struct InfoRow {
-        std::string label;
+        const char* label;
         std::string val;
         SDL_Color color;
     };
 
-    std::vector<InfoRow> infoRows = {
+    InfoRow infoRows[] = {
         { "Module ID:",         item.module_name,     colVal },
         { "Status:",            statusStr,            statusColor },
         { "IWAD Asset:",        iwadStr,              colVal },
@@ -1170,6 +1245,7 @@ void Menu::renderModuleInfoOverlay(TTF_Font* osdFont) {
         { "Active Engine:",     activeEngineStr,      colVal },
         { "Launch Command:",    cmdStr,               colVal }
     };
+    constexpr size_t kNumInfoRows = sizeof(infoRows) / sizeof(infoRows[0]);
 
     int startY = y + 46;
     int rowSpacing = 37;
@@ -1177,7 +1253,7 @@ void Menu::renderModuleInfoOverlay(TTF_Font* osdFont) {
     int valX = x + 215;
     int valMaxW = w - 240;
 
-    for (size_t i = 0; i < infoRows.size(); ++i) {
+    for (size_t i = 0; i < kNumInfoRows; ++i) {
         int curY = startY + static_cast<int>(i) * rowSpacing;
         renderText(osdFont, infoRows[i].label, labelX, curY, colLabel, false, 185);
         renderText(osdFont, infoRows[i].val, valX, curY, infoRows[i].color, false, valMaxW);
@@ -1185,7 +1261,7 @@ void Menu::renderModuleInfoOverlay(TTF_Font* osdFont) {
 
     std::string footer = "[ Press F3, Esc, or Enter to Close ]";
     int footW = 0;
-    TTF_SizeText(osdFont, footer.c_str(), &footW, nullptr);
+    getTextDimensions(osdFont, footer, colFoot, &footW, nullptr);
     renderText(osdFont, footer, x + (w - footW) / 2, y + h - 32, colFoot, false);
 }
 
@@ -1246,7 +1322,7 @@ void Menu::renderEngineSelectOverlay(TTF_Font* osdFont) {
 
     std::string footer = "[ Up/Down: Select | Enter: Confirm | Esc: Cancel ]";
     int footW = 0;
-    TTF_SizeText(osdFont, footer.c_str(), &footW, nullptr);
+    getTextDimensions(osdFont, footer, colFoot, &footW, nullptr);
     renderText(osdFont, footer, x + (w - footW) / 2, y + h - 32, colFoot, false);
 }
 
@@ -1312,7 +1388,7 @@ void Menu::renderAddWadOverlay(TTF_Font* osdFont) {
         if (!entry.is_dir) {
             std::string sizeStr = "(" + format_file_size(entry.file_size) + ")";
             int sizeW = 0;
-            TTF_SizeText(osdFont, sizeStr.c_str(), &sizeW, nullptr);
+            getTextDimensions(osdFont, sizeStr, gray, &sizeW, nullptr);
             renderText(osdFont, sizeStr, x + w - sizeW - 28, rowY + 3, gray, false);
         }
     }
@@ -1328,8 +1404,8 @@ void Menu::renderAddWadOverlay(TTF_Font* osdFont) {
     std::string foot1 = "[ Up/Down: Navigate | Space: Toggle Select | Enter: Open Dir / Add ]";
     std::string foot2 = "[ A: Confirm Selected | Backspace: Up Dir | Esc: Cancel ]";
     int f1W = 0, f2W = 0;
-    TTF_SizeText(osdFont, foot1.c_str(), &f1W, nullptr);
-    TTF_SizeText(osdFont, foot2.c_str(), &f2W, nullptr);
+    getTextDimensions(osdFont, foot1, gray, &f1W, nullptr);
+    getTextDimensions(osdFont, foot2, gray, &f2W, nullptr);
     renderText(osdFont, foot1, x + (w - f1W) / 2, y + h - 55, gray, false);
     renderText(osdFont, foot2, x + (w - f2W) / 2, y + h - 28, gray, false);
 }
@@ -1447,16 +1523,17 @@ void Menu::renderCreateModuleOverlay(TTF_Font* osdFont) {
         int rowY = startY + 5 * rowH + 8;
         drawFieldHighlight(5, rowY);
         std::string btnText = formFieldIndex == 5 ? "> [ SAVE & ACTIVATE MODULE ] <" : "  [ SAVE & ACTIVATE MODULE ]  ";
+        SDL_Color btnColor = formFieldIndex == 5 ? green : yellow;
         int btnW = 0;
-        TTF_SizeText(osdFont, btnText.c_str(), &btnW, nullptr);
-        renderText(osdFont, btnText, x + (w - btnW) / 2, rowY, formFieldIndex == 5 ? green : yellow, false);
+        getTextDimensions(osdFont, btnText, btnColor, &btnW, nullptr);
+        renderText(osdFont, btnText, x + (w - btnW) / 2, rowY, btnColor, false);
     }
 
     std::string foot1 = "[ Up/Down: Field | Left/Right: Cycle Option | Type: Edit Title ]";
     std::string foot2 = "[ F2 or Enter on Save: Create Module | Esc: Cancel ]";
     int f1W = 0, f2W = 0;
-    TTF_SizeText(osdFont, foot1.c_str(), &f1W, nullptr);
-    TTF_SizeText(osdFont, foot2.c_str(), &f2W, nullptr);
+    getTextDimensions(osdFont, foot1, gray, &f1W, nullptr);
+    getTextDimensions(osdFont, foot2, gray, &f2W, nullptr);
     renderText(osdFont, foot1, x + (w - f1W) / 2, y + h - 55, gray, false);
     renderText(osdFont, foot2, x + (w - f2W) / 2, y + h - 28, gray, false);
 }
@@ -1476,11 +1553,11 @@ void Menu::renderQuitConfirmOverlay(TTF_Font* osdFont) {
 
     std::string prompt1 = "Quit Doom Launcher?";
     int p1W = 0;
-    TTF_SizeText(osdFont, prompt1.c_str(), &p1W, nullptr);
+    getTextDimensions(osdFont, prompt1, yellow, &p1W, nullptr);
     renderText(osdFont, prompt1, x + (w - p1W) / 2, y + 58, yellow, false);
 
     std::string prompt2 = "Press Y or Enter to Exit, Esc or N to Cancel";
     int p2W = 0;
-    TTF_SizeText(osdFont, prompt2.c_str(), &p2W, nullptr);
+    getTextDimensions(osdFont, prompt2, white, &p2W, nullptr);
     renderText(osdFont, prompt2, x + (w - p2W) / 2, y + 102, white, false);
 }

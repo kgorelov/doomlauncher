@@ -76,7 +76,12 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+    SDL_Renderer* renderer = SDL_CreateRenderer(
+        window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC
+    );
+    if (renderer == nullptr) {
+        renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+    }
     if (renderer == nullptr) {
         std::cerr << "Could not create renderer: " << SDL_GetError() << std::endl;
         SDL_DestroyWindow(window);
@@ -158,7 +163,13 @@ int main(int argc, char* argv[]) {
     bool quit = false;
     SDL_Event event;
 
+    constexpr Uint64 TARGET_FRAME_MS = 16; // ~60 FPS cap when VSync is unavailable
+    constexpr Uint64 SIM_TICK_MS = 33;     // ~30 Hz fixed simulation tick for fire & sky
+    Uint64 lastSimTick = SDL_GetTicks64() - SIM_TICK_MS;
+
     while (!quit) {
+        Uint64 frameStart = SDL_GetTicks64();
+
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) {
                 quit = true;
@@ -172,18 +183,30 @@ int main(int argc, char* argv[]) {
 
         menu.update();
 
+        Uint64 now = SDL_GetTicks64();
+        if (now - lastSimTick >= SIM_TICK_MS) {
+            sky.update();
+            fire.update();
+            if (now - lastSimTick > SIM_TICK_MS * 2) {
+                lastSimTick = now;
+            } else {
+                lastSimTick += SIM_TICK_MS;
+            }
+        }
+
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);
 
-        sky.update();
         sky.render();
-
-        fire.update();
         fire.render();
-
         menu.render();
 
         SDL_RenderPresent(renderer);
+
+        Uint64 frameElapsed = SDL_GetTicks64() - frameStart;
+        if (frameElapsed < TARGET_FRAME_MS) {
+            SDL_Delay(static_cast<Uint32>(TARGET_FRAME_MS - frameElapsed));
+        }
     }
 
     if (font) TTF_CloseFont(font);

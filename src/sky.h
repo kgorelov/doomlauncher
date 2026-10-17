@@ -16,6 +16,8 @@ private:
     SDL_Renderer* renderer;
     int width;
     int height;
+    int texWidth;
+    int texHeight;
     SDL_Texture* skyTexture;
     float scrollOffset;
 };

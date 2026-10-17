@@ -52,8 +52,11 @@ void test_module_registry() {
         std::ofstream boom_toml("test_boom.toml");
         boom_toml << R"(
 [boom]
-BOOM_BIN = "/usr/bin/boom"
-CMD = "{{BOOM_BIN}} -iwad {{IWAD_PATH}} {% if COMPAT_LEVEL %}-complevel {{COMPAT_LEVEL}}{% endif %} {% if PWADS %}{% for wad in PWADS %}-file {{wad}} {% endfor %}{% endif %}-savedir {{MODULE_DIR}}/.saves"
+type = "engine"
+title = "Boom"
+binary = "sh"
+capabilities = ["vanilla", "boom"]
+cmd = "{{BIN}} -iwad {{IWAD}} {% if COMPAT_LEVEL %}-complevel {{COMPAT_LEVEL}}{% endif %}{% if PWADS %}{% for wad in PWADS %} -file {{wad}}{% endfor %}{% endif %} -savedir {{SAVEDIR}}"
 )";
     }
 
@@ -61,10 +64,10 @@ CMD = "{{BOOM_BIN}} -iwad {{IWAD_PATH}} {% if COMPAT_LEVEL %}-complevel {{COMPAT
         std::ofstream doom2_toml("test_doom2.toml");
         doom2_toml << R"(
 [doom2]
+type = "game"
 title = "Doom II: Hell on Earth"
-requires = ["boom"]
-IWAD_PATH = "{{MODULE_DIR}}/DOOM2.WAD"
-COMPAT_LEVEL = 2
+iwad = "DOOM2.WAD"
+compat_level = 2
 )";
     }
 
@@ -72,9 +75,10 @@ COMPAT_LEVEL = 2
         std::ofstream plutonia_toml("test_plutonia.toml");
         plutonia_toml << R"(
 [plutonia]
+type = "game"
 title = "Final Doom: Plutonia Experiment"
-requires = ["doom2"]
-PWADS = ["PLUTONIA.WAD"]
+base_game = "doom2"
+pwads = ["PLUTONIA.WAD"]
 )";
     }
 
@@ -89,6 +93,8 @@ PWADS = ["PLUTONIA.WAD"]
     for (const auto& item : menu_items) {
         std::cout << "Menu Item: '" << item.title << "' (" << item.module_name << ")" << std::endl;
         std::cout << "  CMD: " << item.cmd << std::endl;
+        assert(item.save_dir == ModuleRegistry::get_module_save_dir(item.module_name));
+        assert(item.cmd.find(item.save_dir) != std::string::npos);
     }
 
     assert(menu_items.size() == 2); // doom2 and plutonia
@@ -116,6 +122,8 @@ void test_real_modules() {
         std::cout << "Menu Item: '" << item.title << "' (" << item.module_name << ")" << std::endl;
         std::cout << "  CMD: " << item.cmd << std::endl;
         assert(!item.cmd.empty());
+        assert(item.save_dir == ModuleRegistry::get_module_save_dir(item.module_name));
+        assert(item.cmd.find(item.save_dir) != std::string::npos);
     }
     assert(menu_items.size() == 5);
     std::cout << "Real modules test passed!" << std::endl << std::endl;
@@ -164,11 +172,12 @@ void test_asset_resolver() {
     std::string found_alias = resolver.resolve("doom");
     assert(!found_alias.empty());
 
-    // 5. Test UserConfig TOML loading
+    // 5. Test UserConfig TOML loading & saving with module_dirs array
     {
         std::ofstream cfg("temp_config.toml");
         cfg << R"(
 [paths]
+modules = ["/usr/share/doomlauncher/modules", "~/.config/doomlauncher/modules"]
 wad_dirs = ["temp_test_assets"]
 
 [preferences]
@@ -180,14 +189,27 @@ doom2 = "temp_test_assets/DOOM2.WAD"
     }
 
     UserConfig user_cfg = AssetResolver::load_config("temp_config.toml");
+    assert(user_cfg.module_dirs.size() == 2);
+    assert(user_cfg.module_dirs[0] == "/usr/share/doomlauncher/modules");
+    assert(user_cfg.module_dirs[1] == "~/.config/doomlauncher/modules");
     assert(user_cfg.wad_dirs.size() == 1);
     assert(user_cfg.wad_dirs[0] == "temp_test_assets");
     assert(user_cfg.default_engine == "dsda-doom");
     assert(user_cfg.iwads.find("doom2") != user_cfg.iwads.end());
 
+    // Test saving config and reloading
+    user_cfg.iwads["plutonia"] = "temp_test_assets/PLUTONIA.WAD";
+    assert(AssetResolver::save_config(user_cfg, "temp_config_saved.toml"));
+    UserConfig reloaded_cfg = AssetResolver::load_config("temp_config_saved.toml");
+    assert(reloaded_cfg.module_dirs == user_cfg.module_dirs);
+    assert(reloaded_cfg.wad_dirs == user_cfg.wad_dirs);
+    assert(reloaded_cfg.default_engine == "dsda-doom");
+    assert(reloaded_cfg.iwads.at("plutonia") == "temp_test_assets/PLUTONIA.WAD");
+
     // Clean up
     fs::remove_all(temp_dir);
     fs::remove("temp_config.toml");
+    fs::remove("temp_config_saved.toml");
 
     std::cout << "AssetResolver tests passed!" << std::endl << std::endl;
 }
@@ -209,7 +231,11 @@ void test_module_registry_asset_resolution() {
         std::ofstream f("test_eng.toml");
         f << R"(
 [eng]
-CMD = "engine -iwad {{IWAD_PATH}} {% if PWADS %}-file {{PWADS[0]}}{% endif %}"
+type = "engine"
+title = "Test Engine"
+binary = "sh"
+capabilities = ["vanilla"]
+cmd = "{{BIN}} -iwad {{IWAD}} {% if PWADS %}-file {{PWADS[0]}}{% endif %}"
 )";
     }
 
@@ -218,9 +244,9 @@ CMD = "engine -iwad {{IWAD_PATH}} {% if PWADS %}-file {{PWADS[0]}}{% endif %}"
         std::ofstream f("test_game.toml");
         f << R"(
 [game1]
+type = "game"
 title = "Test Game Found"
-requires = ["eng"]
-IWAD_PATH = "doom2.wad"
+iwad = "doom2.wad"
 )";
     }
 
@@ -229,9 +255,9 @@ IWAD_PATH = "doom2.wad"
         std::ofstream f("test_missing.toml");
         f << R"(
 [game2]
+type = "game"
 title = "Test Game Missing"
-requires = ["eng"]
-IWAD_PATH = "missing_iwad.wad"
+iwad = "missing_iwad.wad"
 )";
     }
 
@@ -312,7 +338,7 @@ type = "engine"
 title = "Sample Engine"
 binary = "sh"
 capabilities = ["vanilla", "boom", "sample_feature"]
-cmd = "{{BIN}} -iwad {{IWAD_PATH}}"
+cmd = "{{BIN}} -iwad {{IWAD}}"
 )";
     }
 
@@ -357,7 +383,7 @@ type = "engine"
 title = "Dynamic Boom"
 binary = "sh"
 capabilities = ["vanilla", "boom"]
-cmd = "{{BIN}} -iwad {{IWAD_PATH}} -complevel {{COMPAT_LEVEL}}"
+cmd = "{{BIN}} -iwad {{IWAD}} -complevel {{COMPAT_LEVEL}}"
 )";
     }
 
@@ -367,8 +393,8 @@ cmd = "{{BIN}} -iwad {{IWAD_PATH}} -complevel {{COMPAT_LEVEL}}"
         f << R"(
 [dyn_game]
 title = "Dynamic Decoupled Game"
-IWAD_PATH = "doom2.wad"
-COMPAT_LEVEL = 2
+iwad = "doom2.wad"
+compat_level = 2
 requires_capability = ["vanilla"]
 )";
     }
@@ -424,7 +450,7 @@ type = "engine"
 title = "Test Engine"
 binary = "sh"
 capabilities = ["vanilla", "boom"]
-cmd = "{{BIN}} -iwad {{IWAD_PATH}} {% if COMPAT_LEVEL %}-complevel {{COMPAT_LEVEL}}{% endif %}{% if PWADS %}{% for wad in PWADS %} -file {{wad}}{% endfor %}{% endif %}"
+cmd = "{{BIN}} -iwad {{IWAD}} {% if COMPAT_LEVEL %}-complevel {{COMPAT_LEVEL}}{% endif %}{% if PWADS %}{% for wad in PWADS %} -file {{wad}}{% endfor %}{% endif %}"
 )";
     }
 
@@ -507,7 +533,7 @@ type = "engine"
 title = "Engine One"
 binary = "sh"
 capabilities = ["vanilla"]
-cmd = "{{BIN}} -iwad {{IWAD_PATH}} --engine1"
+cmd = "{{BIN}} -iwad {{IWAD}} --engine1"
 )";
     }
 
@@ -519,7 +545,7 @@ type = "engine"
 title = "Engine Two"
 binary = "sh"
 capabilities = ["vanilla", "advanced"]
-cmd = "{{BIN}} -iwad {{IWAD_PATH}} --engine2"
+cmd = "{{BIN}} -iwad {{IWAD}} --engine2"
 )";
     }
 
@@ -876,7 +902,7 @@ type = "engine"
 title = "Boom Engine"
 binary = "sh"
 capabilities = ["vanilla", "boom", "complevel"]
-cmd = "{{BIN}} -iwad {{IWAD_PATH}} {% if COMPAT_LEVEL %}-complevel {{COMPAT_LEVEL}}{% endif %}{% if PWADS %}{% for wad in PWADS %} -file {{wad}}{% endfor %}{% endif %}{% if SAVEDIR %} -save {{SAVEDIR}}{% endif %}"
+cmd = "{{BIN}} -iwad {{IWAD}} {% if COMPAT_LEVEL %}-complevel {{COMPAT_LEVEL}}{% endif %}{% if PWADS %}{% for wad in PWADS %} -file {{wad}}{% endfor %}{% endif %} -save {{SAVEDIR}}"
 )";
     }
 
@@ -889,7 +915,7 @@ type = "engine"
 title = "GZDoom Engine"
 binary = "sh"
 capabilities = ["vanilla", "boom", "gzdoom"]
-cmd = "{{BIN}} -iwad {{IWAD_PATH}}{% if PWADS %}{% for wad in PWADS %} -file {{wad}}{% endfor %}{% endif %}{% if SAVEDIR %} -savedir {{SAVEDIR}}{% endif %}"
+cmd = "{{BIN}} -iwad {{IWAD}}{% if PWADS %}{% for wad in PWADS %} -file {{wad}}{% endfor %}{% endif %} -savedir {{SAVEDIR}}"
 )";
     }
 
@@ -902,11 +928,11 @@ type = "engine"
 title = "Chocolate Doom"
 binary = "sh"
 capabilities = ["vanilla"]
-cmd = "{{BIN}} -iwad {{IWAD_PATH}}{% if PWADS %}{% for wad in PWADS %} -merge {{wad}}{% endfor %}{% endif %}{% if SAVEDIR %} -savedir {{SAVEDIR}}{% endif %}"
+cmd = "{{BIN}} -iwad {{IWAD}}{% if PWADS %}{% for wad in PWADS %} -merge {{wad}}{% endfor %}{% endif %} -savedir {{SAVEDIR}}"
 )";
     }
 
-    // Game requiring 'vanilla' capability, compat_level 2, PWAD SIGIL.WAD, and savedir
+    // Game requiring 'vanilla' capability, compat_level 2, PWAD SIGIL.WAD
     {
         std::ofstream f("test_p6_game.toml");
         f << R"(
@@ -916,10 +942,11 @@ title = "Phase 6 Game"
 iwad = "DOOM2.WAD"
 pwads = ["SIGIL.WAD"]
 compat_level = 2
-savedir = "/tmp/doom_saves"
 requires_capability = ["vanilla"]
 )";
     }
+
+    setenv("DOOMLAUNCHER_SAVES", "/tmp/doom_saves", 1);
 
     ModuleRegistry registry;
     registry.get_asset_resolver().add_search_dir(temp_dir.string());
@@ -937,6 +964,7 @@ requires_capability = ["vanilla"]
     assert(item.status == GameStatus::Ready);
     assert(item.assets_found);
     assert(item.compatible_engines.size() == 3);
+    assert(item.save_dir == "/tmp/doom_saves/p6_game");
 
     // 1. Select Boom engine: verify -complevel 2, -file, and -save are present
     assert(item.select_engine("p6-boom"));
@@ -946,7 +974,7 @@ requires_capability = ["vanilla"]
     assert(boom_cmd.find("-complevel 2") != std::string::npos);
     assert(boom_cmd.find("-file") != std::string::npos);
     assert(boom_cmd.find("SIGIL.WAD") != std::string::npos);
-    assert(boom_cmd.find("-save /tmp/doom_saves") != std::string::npos);
+    assert(boom_cmd.find("-save /tmp/doom_saves/p6_game") != std::string::npos);
     assert(boom_cmd.find("-savedir") == std::string::npos);
     assert(boom_cmd.find("-merge") == std::string::npos);
 
@@ -958,7 +986,7 @@ requires_capability = ["vanilla"]
     assert(gz_cmd.find("-complevel") == std::string::npos);
     assert(gz_cmd.find("-file") != std::string::npos);
     assert(gz_cmd.find("SIGIL.WAD") != std::string::npos);
-    assert(gz_cmd.find("-savedir /tmp/doom_saves") != std::string::npos);
+    assert(gz_cmd.find("-savedir /tmp/doom_saves/p6_game") != std::string::npos);
     assert(gz_cmd.find(" -save ") == std::string::npos);
     assert(gz_cmd.find("-merge") == std::string::npos);
 
@@ -971,7 +999,7 @@ requires_capability = ["vanilla"]
     assert(choco_cmd.find("-merge") != std::string::npos);
     assert(choco_cmd.find("SIGIL.WAD") != std::string::npos);
     assert(choco_cmd.find("-file") == std::string::npos);
-    assert(choco_cmd.find("-savedir /tmp/doom_saves") != std::string::npos);
+    assert(choco_cmd.find("-savedir /tmp/doom_saves/p6_game") != std::string::npos);
 
     // 4. Switch back to Boom: verify -complevel 2 is restored
     assert(item.select_engine("p6-boom"));
@@ -984,6 +1012,8 @@ requires_capability = ["vanilla"]
     assert(!item.cmd.empty());
     assert(item.select_prev_engine());
     assert(item.selected_engine_index == initial_idx);
+
+    unsetenv("DOOMLAUNCHER_SAVES");
 
     // Clean up
     fs::remove_all(temp_dir);
@@ -1343,7 +1373,7 @@ type = "engine"
 title = "Boom Engine"
 binary = "sh"
 capabilities = ["vanilla", "boom"]
-cmd_template = "{{BIN}} -iwad {{IWAD}}"
+cmd = "{{BIN}} -iwad {{IWAD}}"
 )";
     }
 
@@ -1355,7 +1385,7 @@ type = "engine"
 title = "GZDoom"
 binary = "sh"
 capabilities = ["vanilla", "boom", "gzdoom"]
-cmd_template = "{{BIN}} -iwad {{IWAD}}"
+cmd = "{{BIN}} -iwad {{IWAD}}"
 )";
     }
 
@@ -1556,6 +1586,122 @@ void test_gui_rendering_verification() {
     std::cout << "Phase 6 Full GUI Rendering Verification Tests passed!" << std::endl << std::endl;
 }
 
+void test_phase1_multi_module_dirs_and_saves() {
+    std::cout << "--- Running Phase 1 Multi-Directory Modules & Centralized Saves Tests ---" << std::endl;
+    namespace fs = std::filesystem;
+
+    fs::path sys_mods = "temp_p1_sys_modules";
+    fs::path usr_mods = "temp_p1_usr_modules";
+    fs::path wad_dir = "temp_p1_wads";
+    fs::path cfg_file = "temp_p1_config.toml";
+
+    fs::create_directories(sys_mods / "engines");
+    fs::create_directories(sys_mods / "games");
+    fs::create_directories(usr_mods / "games");
+    fs::create_directories(wad_dir);
+
+    {
+        std::ofstream f(wad_dir / "DOOM2.WAD");
+        f << "IWAD";
+    }
+    {
+        std::ofstream f(wad_dir / "CUSTOM.WAD");
+        f << "PWAD";
+    }
+
+    // System engine
+    {
+        std::ofstream f(sys_mods / "engines" / "dsda.toml");
+        f << R"(
+[dsda-doom]
+type = "engine"
+title = "DSDA-Doom"
+binary = "sh"
+capabilities = ["vanilla", "boom"]
+cmd = "{{BIN}} -iwad {{IWAD}} {% if COMPAT_LEVEL %}-complevel {{COMPAT_LEVEL}}{% endif %}{% if PWADS %}{% for wad in PWADS %} -file {{wad}}{% endfor %}{% endif %} -savedir {{SAVEDIR}}"
+)";
+    }
+
+    // System base game
+    {
+        std::ofstream f(sys_mods / "games" / "doom2.toml");
+        f << R"TOML(
+[doom2]
+type = "game"
+title = "Doom II (System)"
+iwad = "DOOM2.WAD"
+compat_level = 2
+requires_capability = ["vanilla"]
+)TOML";
+    }
+
+    // User game + user override of doom2
+    {
+        std::ofstream f(usr_mods / "games" / "custom_mod.toml");
+        f << R"TOML(
+[custom_mod]
+type = "game"
+title = "User Custom Mod"
+base_game = "doom2"
+pwads = ["CUSTOM.WAD"]
+compat_level = 9
+requires_capability = ["boom"]
+)TOML";
+    }
+    {
+        std::ofstream f(usr_mods / "games" / "doom2_override.toml");
+        f << R"TOML(
+[doom2]
+type = "game"
+title = "Doom II (User Override)"
+iwad = "DOOM2.WAD"
+compat_level = 2
+requires_capability = ["vanilla"]
+)TOML";
+    }
+
+    // Save UserConfig with both module dirs
+    UserConfig cfg;
+    cfg.module_dirs = { sys_mods.string(), usr_mods.string() };
+    cfg.wad_dirs = { wad_dir.string() };
+    cfg.default_engine = "dsda-doom";
+    assert(AssetResolver::save_config(cfg, cfg_file.string()));
+
+    ModuleRegistry reg;
+    assert(reg.load_user_config(cfg_file.string()));
+    assert(reg.load_configured_modules());
+
+    auto items = reg.resolve_menu_items();
+    assert(items.size() == 2);
+
+    bool found_doom2 = false;
+    bool found_custom = false;
+    for (const auto& item : items) {
+        std::string expected_save = ModuleRegistry::get_module_save_dir(item.module_name);
+        assert(item.save_dir == expected_save);
+        assert(item.cmd.find("-savedir " + expected_save) != std::string::npos);
+
+        if (item.module_name == "doom2") {
+            found_doom2 = true;
+            // Verify user module overrode system module
+            assert(item.title == "Doom II (User Override)");
+        } else if (item.module_name == "custom_mod") {
+            found_custom = true;
+            assert(item.title == "User Custom Mod");
+            assert(item.cmd.find("-complevel 9") != std::string::npos);
+            assert(item.cmd.find("CUSTOM.WAD") != std::string::npos);
+        }
+    }
+    assert(found_doom2 && found_custom);
+
+    fs::remove_all(sys_mods);
+    fs::remove_all(usr_mods);
+    fs::remove_all(wad_dir);
+    fs::remove(cfg_file);
+
+    std::cout << "Phase 1 Multi-Directory Modules & Centralized Saves Tests passed!" << std::endl << std::endl;
+}
+
 int main() {
     test_template_engine();
     test_module_registry();
@@ -1574,6 +1720,7 @@ int main() {
     test_menu_overlays();
     test_phase5_state_persistence();
     test_gui_rendering_verification();
+    test_phase1_multi_module_dirs_and_saves();
     std::cout << "ALL TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;
 }

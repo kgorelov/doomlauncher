@@ -13,11 +13,15 @@ namespace doomlauncher {
 struct Module {
     std::string name;
     std::string title;
-    std::string module_dir;
     std::string type;
+    std::string base_game;
 
     std::vector<std::string> requires;
     std::vector<std::string> includes;
+
+    std::string iwad;
+    std::vector<std::string> pwads;
+    std::string compat_level;
     std::vector<std::string> requires_capability;
 
     Scope vars;
@@ -33,6 +37,7 @@ struct ResolvedMenuItem {
     std::string module_name;
     std::string title;
     std::string cmd;
+    std::string save_dir;
     Scope vars;
 
     GameStatus status = GameStatus::Ready;
@@ -60,6 +65,7 @@ public:
 
     bool load_file(const std::string& filepath);
     bool load_directory(const std::string& dirpath);
+    bool load_configured_modules();
     bool load_user_config(const std::string& config_path = "");
 
     bool load_state(const std::string& filepath = "");
@@ -72,6 +78,8 @@ public:
     void apply_saved_state(std::vector<ResolvedMenuItem>& items) const;
 
     static std::string get_default_state_path();
+    static std::string get_default_saves_root();
+    static std::string get_module_save_dir(const std::string& module_name);
     static bool save_state_from_items(const std::vector<ResolvedMenuItem>& items, std::string& out_saved_path, const std::string& filepath = "");
 
     void set_asset_resolver(const AssetResolver& resolver);

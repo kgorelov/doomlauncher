@@ -225,8 +225,6 @@ bool EngineRegistry::load_engine_file(const std::string& filepath) {
         return false;
     }
 
-    fs::path p(filepath);
-
     for (const auto& [key, val] : root) {
         if (auto tbl = val.as_table()) {
             EngineInfo eng;
@@ -279,37 +277,21 @@ bool EngineRegistry::load_engine_file(const std::string& filepath) {
                 if (auto s = cmd_node->as_string()) {
                     eng.cmd_template = std::string(s->get());
                 }
-            } else if (auto cmd_upper = tbl->get("CMD")) {
-                if (auto s = cmd_upper->as_string()) {
-                    eng.cmd_template = std::string(s->get());
-                }
             }
 
             for (const auto& [vk, vv] : *tbl) {
                 std::string k_str(vk.str());
                 if (k_str == "type" || k_str == "title" || k_str == "binary" ||
-                    k_str == "binaries" || k_str == "capabilities" ||
-                    k_str == "cmd" || k_str == "CMD") {
+                    k_str == "binaries" || k_str == "capabilities" || k_str == "cmd") {
                     continue;
                 }
                 eng.vars[k_str] = parse_toml_node(vv);
             }
 
-            // Fallback for legacy modules: check <NAME>_BIN or BIN in vars
             if (eng.binary.empty() && eng.binaries.empty()) {
-                std::string upper_name = eng.name;
-                std::transform(upper_name.begin(), upper_name.end(), upper_name.begin(), ::toupper);
-                std::string bin_var = upper_name + "_BIN";
-                if (eng.vars.find(bin_var) != eng.vars.end()) {
-                    eng.binary = eng.vars[bin_var].to_string();
-                } else if (eng.vars.find("BIN") != eng.vars.end()) {
-                    eng.binary = eng.vars["BIN"].to_string();
-                } else {
-                    eng.binary = eng.name;
-                }
+                eng.binary = eng.name;
             }
 
-            // Default capabilities if none specified
             if (eng.capabilities.empty()) {
                 eng.capabilities.push_back("vanilla");
             }

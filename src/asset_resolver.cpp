@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <sstream>
 
@@ -116,6 +117,31 @@ std::string AssetResolver::find_file_in_dir(const std::string& dir, const std::s
     return "";
 }
 
+std::string AssetResolver::get_default_config_path() {
+    const char* env_cfg = std::getenv("DOOMLAUNCHER_CONFIG");
+    if (env_cfg && *env_cfg) {
+        return env_cfg;
+    }
+    const char* xdg_cfg = std::getenv("XDG_CONFIG_HOME");
+    if (xdg_cfg && *xdg_cfg) {
+        return std::string(xdg_cfg) + "/doomlauncher/config.toml";
+    }
+    return expand_path("~/.config/doomlauncher/config.toml");
+}
+
+std::vector<std::string> AssetResolver::get_default_module_dirs() {
+    const char* xdg_cfg = std::getenv("XDG_CONFIG_HOME");
+    std::string user_mod_dir = (xdg_cfg && *xdg_cfg)
+        ? (std::string(xdg_cfg) + "/doomlauncher/modules")
+        : "~/.config/doomlauncher/modules";
+
+    return {
+        "/usr/share/doomlauncher/modules",
+        "modules",
+        user_mod_dir
+    };
+}
+
 std::vector<std::string> AssetResolver::get_default_system_search_paths() {
     std::vector<std::string> paths;
 
@@ -158,59 +184,30 @@ std::vector<std::string> AssetResolver::get_default_system_search_paths() {
 
 UserConfig AssetResolver::load_config(const std::string& explicit_path) {
     UserConfig config;
-    std::string config_file;
-
-    if (!explicit_path.empty()) {
-        config_file = explicit_path;
-    } else {
-        const char* env_cfg = std::getenv("DOOMLAUNCHER_CONFIG");
-        if (env_cfg && *env_cfg) {
-            config_file = env_cfg;
-        } else {
-            const char* xdg_cfg = std::getenv("XDG_CONFIG_HOME");
-            std::string candidate;
-            if (xdg_cfg && *xdg_cfg) {
-                candidate = std::string(xdg_cfg) + "/doomlauncher/config.toml";
-            } else {
-                candidate = expand_path("~/.config/doomlauncher/config.toml");
-            }
-
-            std::error_code ec;
-            if (fs::exists(candidate, ec)) {
-                config_file = candidate;
-            } else if (fs::exists("config.toml", ec)) {
-                config_file = "config.toml";
-            } else if (fs::exists("doomlauncher.toml", ec)) {
-                config_file = "doomlauncher.toml";
-            }
-        }
-    }
-
-    if (config_file.empty()) {
-        return config;
-    }
+    std::string config_file = explicit_path.empty() ? get_default_config_path() : explicit_path;
+    std::string resolved_file = expand_path(config_file);
 
     std::error_code ec;
-    if (!fs::exists(config_file, ec)) {
+    if (!fs::exists(resolved_file, ec)) {
+        config.module_dirs = get_default_module_dirs();
         return config;
     }
 
     toml::table tbl;
     try {
-        tbl = toml::parse_file(config_file);
+        tbl = toml::parse_file(resolved_file);
     } catch (const toml::parse_error& err) {
-        std::cerr << "Warning: Error parsing user config '" << config_file << "': " << err << std::endl;
+        std::cerr << "Warning: Error parsing user config '" << resolved_file << "': " << err << std::endl;
+        config.module_dirs = get_default_module_dirs();
         return config;
     }
 
     if (auto paths_tbl = tbl.get_as<toml::table>("paths")) {
-        if (auto node = paths_tbl->get("modules")) {
-            if (auto str = node->as_string()) {
-                config.modules_path = std::string(str->get());
-            }
-        } else if (auto node = paths_tbl->get("modules_path")) {
-            if (auto str = node->as_string()) {
-                config.modules_path = std::string(str->get());
+        if (auto arr = paths_tbl->get_as<toml::array>("modules")) {
+            for (const auto& elem : *arr) {
+                if (auto str = elem.as_string()) {
+                    config.module_dirs.push_back(std::string(str->get()));
+                }
             }
         }
 
@@ -221,6 +218,10 @@ UserConfig AssetResolver::load_config(const std::string& explicit_path) {
                 }
             }
         }
+    }
+
+    if (config.module_dirs.empty()) {
+        config.module_dirs = get_default_module_dirs();
     }
 
     if (auto prefs_tbl = tbl.get_as<toml::table>("preferences")) {
@@ -245,6 +246,64 @@ UserConfig AssetResolver::load_config(const std::string& explicit_path) {
     }
 
     return config;
+}
+
+bool AssetResolver::save_config(const UserConfig& config, const std::string& explicit_path) {
+    std::string config_file = explicit_path.empty() ? get_default_config_path() : explicit_path;
+    std::string resolved_file = expand_path(config_file);
+
+    try {
+        fs::path p(resolved_file);
+        if (p.has_parent_path()) {
+            std::error_code ec;
+            fs::create_directories(p.parent_path(), ec);
+        }
+
+        toml::table root;
+
+        toml::table paths_tbl;
+        toml::array mods_arr;
+        for (const auto& m : config.module_dirs) {
+            mods_arr.push_back(m);
+        }
+        paths_tbl.insert_or_assign("modules", mods_arr);
+
+        toml::array wads_arr;
+        for (const auto& w : config.wad_dirs) {
+            wads_arr.push_back(w);
+        }
+        paths_tbl.insert_or_assign("wad_dirs", wads_arr);
+        root.insert_or_assign("paths", paths_tbl);
+
+        if (!config.iwads.empty()) {
+            toml::table iwads_tbl;
+            for (const auto& [k, v] : config.iwads) {
+                iwads_tbl.insert_or_assign(k, v);
+            }
+            root.insert_or_assign("iwads", iwads_tbl);
+        }
+
+        toml::table prefs_tbl;
+        if (!config.default_engine.empty()) {
+            prefs_tbl.insert_or_assign("default_engine", config.default_engine);
+        }
+        if (!config.osd_font.empty()) {
+            prefs_tbl.insert_or_assign("osd_font", config.osd_font);
+        }
+        if (!prefs_tbl.empty()) {
+            root.insert_or_assign("preferences", prefs_tbl);
+        }
+
+        std::ofstream out(resolved_file);
+        if (!out.is_open()) {
+            return false;
+        }
+        out << root << "\n";
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "Warning: Failed to save user config '" << resolved_file << "': " << e.what() << std::endl;
+        return false;
+    }
 }
 
 AssetResolver::AssetResolver() {
@@ -294,28 +353,19 @@ std::string AssetResolver::get_iwad_alias(const std::string& alias) const {
     return "";
 }
 
-std::string AssetResolver::resolve(const std::string& file_or_path, const std::string& local_dir) const {
+std::string AssetResolver::resolve(const std::string& file_or_path) const {
     if (file_or_path.empty()) return "";
 
     std::string expanded_input = expand_path(file_or_path);
     std::error_code ec;
 
-    // Check if input is an existing absolute path or relative to CWD
+    // 1. Check if input is an existing absolute path or relative to CWD
     fs::path input_path(expanded_input);
     if (fs::exists(input_path, ec) && !fs::is_directory(input_path, ec)) {
         return input_path.lexically_normal().string();
     }
 
     std::string filename = input_path.filename().string();
-
-    // 1. Check local directory (e.g. {{MODULE_DIR}})
-    if (!local_dir.empty()) {
-        std::string exp_local = expand_path(local_dir);
-        std::string match = find_file_in_dir(exp_local, filename, false);
-        if (!match.empty()) {
-            return match;
-        }
-    }
 
     // 2. Check IWAD aliases
     std::string lower_filename = to_lower(filename);

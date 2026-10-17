@@ -4,4 +4,3 @@ title = "The Ultimate Doom"
 iwad = "DOOM.WAD"
 compat_level = 3
 requires_capability = ["vanilla"]
-savedir = "{{MODULE_DIR}}/.saves"

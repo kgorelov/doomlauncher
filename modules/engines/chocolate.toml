@@ -4,4 +4,4 @@ title = "Chocolate Doom"
 binary = "chocolate-doom"
 binaries = ["chocolate-doom"]
 capabilities = ["vanilla"]
-cmd = "{{BIN}} -iwad {{IWAD_PATH}}{% if PWADS %}{% for wad in PWADS %} -merge {{wad}}{% endfor %}{% endif %} {% if SAVEDIR %}-savedir {{SAVEDIR}}{% endif %}"
+cmd = "{{BIN}} -iwad {{IWAD}}{% if PWADS %}{% for wad in PWADS %} -merge {{wad}}{% endfor %}{% endif %} -savedir {{SAVEDIR}}"

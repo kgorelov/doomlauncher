@@ -1,6 +1,7 @@
 #include "menu.h"
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <iostream>
 
 Menu::Menu(SDL_Renderer* renderer, TTF_Font* font, TTF_Font* smallFont, int screenWidth, int screenHeight, TTF_Font* altSmallFont)
@@ -225,6 +226,11 @@ void Menu::launchSelected() {
         statusMessage = "No CMD defined for " + item.title;
         std::cout << statusMessage << std::endl;
         return;
+    }
+
+    if (!item.save_dir.empty()) {
+        std::error_code ec;
+        std::filesystem::create_directories(item.save_dir, ec);
     }
 
     statusMessage = "Launching: " + cmd;
@@ -553,8 +559,8 @@ void Menu::renderModuleInfoOverlay(TTF_Font* osdFont) {
     std::string iwadStr;
     if (!item.resolved_iwad_path.empty()) {
         iwadStr = item.resolved_iwad_path;
-    } else if (item.vars.find("iwad") != item.vars.end()) {
-        iwadStr = item.vars.at("iwad").to_string();
+    } else if (item.vars.find("IWAD") != item.vars.end()) {
+        iwadStr = item.vars.at("IWAD").to_string();
     } else {
         iwadStr = "(None)";
     }
@@ -565,19 +571,15 @@ void Menu::renderModuleInfoOverlay(TTF_Font* osdFont) {
             if (i > 0) pwadsStr += ", ";
             pwadsStr += item.resolved_pwad_paths[i];
         }
-    } else if (item.vars.find("pwads") != item.vars.end()) {
-        pwadsStr = item.vars.at("pwads").to_string();
+    } else if (item.vars.find("PWADS") != item.vars.end()) {
+        pwadsStr = item.vars.at("PWADS").to_string();
     } else {
         pwadsStr = "(None)";
     }
 
     std::string complevelStr = "Default / Auto";
-    if (item.vars.find("complevel") != item.vars.end()) {
-        complevelStr = item.vars.at("complevel").to_string();
-    } else if (item.vars.find("COMPAT_LEVEL") != item.vars.end()) {
+    if (item.vars.find("COMPAT_LEVEL") != item.vars.end()) {
         complevelStr = item.vars.at("COMPAT_LEVEL").to_string();
-    } else if (item.vars.find("compat_level") != item.vars.end()) {
-        complevelStr = item.vars.at("compat_level").to_string();
     }
     if (complevelStr == "2") complevelStr = "2 (Doom v1.9)";
     else if (complevelStr == "3") complevelStr = "3 (Ultimate Doom)";
@@ -595,13 +597,9 @@ void Menu::renderModuleInfoOverlay(TTF_Font* osdFont) {
         reqCaps = "mbf21";
     }
 
-    std::string saveDirStr = "Default";
-    if (item.vars.find("savedir") != item.vars.end()) {
-        saveDirStr = item.vars.at("savedir").to_string();
-    } else if (item.vars.find("SAVEDIR") != item.vars.end()) {
+    std::string saveDirStr = !item.save_dir.empty() ? item.save_dir : "Default";
+    if (saveDirStr == "Default" && item.vars.find("SAVEDIR") != item.vars.end()) {
         saveDirStr = item.vars.at("SAVEDIR").to_string();
-    } else if (item.vars.find("save") != item.vars.end()) {
-        saveDirStr = item.vars.at("save").to_string();
     }
 
     std::string installedEnginesStr;

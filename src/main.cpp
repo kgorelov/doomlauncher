@@ -138,27 +138,9 @@ int main(int argc, char* argv[]) {
                 std::cerr << "Error: Specified path does not exist: " << path << std::endl;
             }
         }
-    } else if (!registry.get_user_config().modules_path.empty()) {
-        std::string cfgMod = doomlauncher::AssetResolver::expand_path(registry.get_user_config().modules_path);
-        if (fs::is_directory(cfgMod)) {
-            std::cout << "Loading configured modules directory: " << cfgMod << std::endl;
-            registry.load_directory(cfgMod);
-        } else if (fs::exists(cfgMod)) {
-            std::cout << "Loading configured config file: " << cfgMod << std::endl;
-            registry.load_file(cfgMod);
-        } else {
-            std::cerr << "Warning: Configured modules path does not exist: " << cfgMod << std::endl;
-        }
     } else {
-        std::string configPath = "modules/main.toml";
-        if (fs::exists(configPath)) {
-            std::cout << "Loading config file: " << configPath << std::endl;
-            registry.load_file(configPath);
-        } else if (fs::exists("modules")) {
-            std::cout << "Loading modules directory..." << std::endl;
-            registry.load_directory("modules");
-        } else {
-            std::cerr << "Warning: No config modules found!" << std::endl;
+        if (!registry.load_configured_modules()) {
+            std::cerr << "Warning: No config modules found in configured module directories!" << std::endl;
         }
     }
 

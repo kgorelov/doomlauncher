@@ -121,10 +121,11 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Load config modules
+    // Load config modules & discover WADs
     doomlauncher::ModuleRegistry registry;
-    registry.load_user_config();
     registry.load_state();
+    registry.load_user_config();
+    registry.get_wad_catalog().save_cache();
 
     if (!modulePaths.empty()) {
         for (const auto& path : modulePaths) {

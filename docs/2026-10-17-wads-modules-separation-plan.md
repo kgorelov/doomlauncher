@@ -386,10 +386,10 @@ enum class OverlayState {
 - [x] **Step 2: WAD Catalog & SHA-1 Engine**
   - [x] Implement `src/wad_catalog.h` and `src/wad_catalog.cpp` with built-in SHA-1 calculation and `[wad_cache]` in `state.toml`.
   - [x] Implement prioritized dependency list placing `doom2.wad` and `doom.wad` at the top.
-- [ ] **Step 3: WAD-Driven Module Activation**
-  - [ ] Add `iwad_sha1` / `pwad_sha1` matching in `ModuleRegistry`.
-  - [ ] Activate and display only modules whose WAD requirements are satisfied.
-  - [ ] Implement `ModuleRegistry::create_user_module()` saving to `~/.config/doomlauncher/modules/games/`.
+- [x] **Step 3: WAD-Driven Module Activation**
+  - [x] Add `iwad_sha1` / `pwad_sha1` matching in `ModuleRegistry`.
+  - [x] Activate and display only modules whose WAD requirements are satisfied.
+  - [x] Implement `ModuleRegistry::create_user_module()` saving to `~/.config/doomlauncher/modules/games/`.
 - [ ] **Step 4: "Add WAD" & "Create Module" UI**
   - [ ] Implement `OverlayState::AddWadDialog` (F5 filesystem browser with multi-WAD selection).
   - [ ] Implement `OverlayState::CreateModuleForm` (interactive dialog for unmatched WADs).

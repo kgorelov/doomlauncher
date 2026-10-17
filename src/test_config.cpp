@@ -47,6 +47,18 @@ void test_template_engine() {
 
 void test_module_registry() {
     std::cout << "--- Running ModuleRegistry & TOML tests ---" << std::endl;
+    namespace fs = std::filesystem;
+
+    fs::path temp_wads = "temp_mod_reg_wads";
+    fs::create_directories(temp_wads);
+    {
+        std::ofstream f(temp_wads / "DOOM2.WAD");
+        f << "IWAD";
+    }
+    {
+        std::ofstream f(temp_wads / "PLUTONIA.WAD");
+        f << "PWAD";
+    }
 
     // Create temporary test files
     {
@@ -88,6 +100,11 @@ pwads = ["PLUTONIA.WAD"]
     assert(registry.load_file("test_doom2.toml"));
     assert(registry.load_file("test_plutonia.toml"));
 
+    // Before WAD discovery, no modules are active
+    assert(registry.resolve_menu_items().empty());
+
+    // Discover WADs -> both modules activate
+    registry.get_wad_catalog().scan_directory(temp_wads.string());
     std::vector<ResolvedMenuItem> menu_items = registry.resolve_menu_items();
 
     std::cout << "Resolved Menu Items Count: " << menu_items.size() << std::endl;
@@ -101,6 +118,7 @@ pwads = ["PLUTONIA.WAD"]
     assert(menu_items.size() == 2); // doom2 and plutonia
 
     // Clean up temporary test files
+    fs::remove_all(temp_wads);
     std::remove("test_boom.toml");
     std::remove("test_doom2.toml");
     std::remove("test_plutonia.toml");
@@ -110,12 +128,23 @@ pwads = ["PLUTONIA.WAD"]
 
 void test_real_modules() {
     std::cout << "--- Testing modules/main.toml ---" << std::endl;
+    namespace fs = std::filesystem;
+
+    fs::path temp_wads = "temp_real_mod_wads";
+    fs::create_directories(temp_wads);
+    for (const char* w : {"DOOM.WAD", "DOOM2.WAD", "TNT.WAD", "PLUTONIA.WAD", "SIGIL.WAD"}) {
+        std::ofstream f(temp_wads / w);
+        f << "IWAD";
+    }
+
     ModuleRegistry registry;
     bool loaded = registry.load_file("modules/main.toml");
     if (!loaded) {
         loaded = registry.load_file("../modules/main.toml");
     }
     assert(loaded);
+
+    registry.get_wad_catalog().scan_directory(temp_wads.string());
 
     std::vector<ResolvedMenuItem> menu_items = registry.resolve_menu_items();
     std::cout << "Loaded real modules count: " << menu_items.size() << std::endl;
@@ -127,6 +156,8 @@ void test_real_modules() {
         assert(item.cmd.find(item.save_dir) != std::string::npos);
     }
     assert(menu_items.size() == 5);
+
+    fs::remove_all(temp_wads);
     std::cout << "Real modules test passed!" << std::endl << std::endl;
 }
 
@@ -269,7 +300,13 @@ iwad = "missing_iwad.wad"
     assert(registry.load_file("test_game.toml"));
     assert(registry.load_file("test_missing.toml"));
 
-    std::vector<ResolvedMenuItem> items = registry.resolve_menu_items();
+    // Default resolve_menu_items() returns ONLY active (satisfied) modules
+    std::vector<ResolvedMenuItem> active_items = registry.resolve_menu_items();
+    assert(active_items.size() == 1);
+    assert(active_items[0].module_name == "game1");
+
+    // resolve_menu_items(false) includes inactive modules for inspection
+    std::vector<ResolvedMenuItem> items = registry.resolve_menu_items(false);
     assert(items.size() == 2);
 
     for (const auto& item : items) {
@@ -578,7 +615,11 @@ requires_capability = ["quantum_feature"]
     assert(registry.load_file("test_p4_eng2.toml"));
     assert(registry.load_file("test_p4_games.toml"));
 
-    std::vector<ResolvedMenuItem> items = registry.resolve_menu_items();
+    // Default resolve_menu_items() omits missing_game
+    std::vector<ResolvedMenuItem> active_items = registry.resolve_menu_items();
+    assert(active_items.size() == 2);
+
+    std::vector<ResolvedMenuItem> items = registry.resolve_menu_items(false);
     assert(items.size() == 3);
 
     for (auto& item : items) {
@@ -614,6 +655,7 @@ requires_capability = ["quantum_feature"]
 
     // Test UserConfig default_engine preference
     UserConfig user_cfg;
+    user_cfg.wad_dirs = { temp_dir.string() };
     user_cfg.default_engine = "eng2";
     registry.set_user_config(user_cfg);
     std::vector<ResolvedMenuItem> pref_items = registry.resolve_menu_items();
@@ -1829,6 +1871,167 @@ void test_phase2_wad_catalog_and_sha1() {
     std::cout << "Phase 2 WAD Catalog, SHA-1 & Cache Persistence Tests passed!" << std::endl << std::endl;
 }
 
+void test_phase3_wad_driven_module_activation() {
+    std::cout << "--- Running Phase 3 WAD-Driven Module Activation & User Module Creation Tests ---" << std::endl;
+    namespace fs = std::filesystem;
+
+    fs::path wad_dir = "temp_p3_wads";
+    fs::path sys_mods = "temp_p3_sys_mods";
+    fs::path usr_mods = "temp_p3_usr_mods";
+    fs::remove_all(wad_dir);
+    fs::remove_all(sys_mods);
+    fs::remove_all(usr_mods);
+    fs::create_directories(wad_dir);
+    fs::create_directories(sys_mods / "engines");
+    fs::create_directories(sys_mods / "games");
+    fs::create_directories(usr_mods / "games");
+
+    // Create mock WADs with known content -> compute their SHA-1 hashes
+    fs::path doom2_path = wad_dir / "renamed_doom2_release.wad";
+    fs::path sigil_path = wad_dir / "my_sigil_download.wad";
+    fs::path eviternity_path = wad_dir / "Eviternity.wad";
+
+    {
+        std::ofstream f(doom2_path, std::ios::binary);
+        f << "IWAD_DOOM2_UNIQUE_BYTES_FOR_SHA1";
+    }
+    {
+        std::ofstream f(sigil_path, std::ios::binary);
+        f << "PWAD_SIGIL_UNIQUE_BYTES_FOR_SHA1";
+    }
+    {
+        std::ofstream f(eviternity_path, std::ios::binary);
+        f << "PWAD_EVITERNITY_UNIQUE_BYTES_FOR_SHA1";
+    }
+
+    std::string doom2_sha1 = WadCatalog::compute_file_sha1(doom2_path.string());
+    std::string sigil_sha1 = WadCatalog::compute_file_sha1(sigil_path.string());
+    std::string eviternity_sha1 = WadCatalog::compute_file_sha1(eviternity_path.string());
+
+    // System engine
+    {
+        std::ofstream f(sys_mods / "engines" / "dsda.toml");
+        f << R"TOML(
+[dsda-doom]
+type = "engine"
+title = "DSDA-Doom"
+binary = "sh"
+capabilities = ["vanilla", "boom", "mbf", "mbf21"]
+cmd = "{{BIN}} -iwad {{IWAD}} {% if COMPAT_LEVEL %}-complevel {{COMPAT_LEVEL}}{% endif %}{% if PWADS %}{% for wad in PWADS %} -file {{wad}}{% endfor %}{% endif %} -savedir {{SAVEDIR}}"
+)TOML";
+    }
+
+    // Pre-installed modules: doom2 (matched by SHA-1 even though filename on disk is renamed_doom2_release.wad!),
+    // sigil (depends on doom2 for this test, matched by SHA-1), and plutonia (missing WAD -> must NOT activate!)
+    {
+        std::ofstream f(sys_mods / "games" / "doom2.toml");
+        f << "[doom2]\n"
+          << "type = \"game\"\n"
+          << "title = \"Doom II: Hell on Earth\"\n"
+          << "iwad = \"DOOM2.WAD\"\n"
+          << "iwad_sha1 = [\"" << doom2_sha1 << "\"]\n"
+          << "compat_level = 2\n"
+          << "requires_capability = [\"vanilla\"]\n";
+    }
+    {
+        std::ofstream f(sys_mods / "games" / "sigil.toml");
+        f << "[sigil]\n"
+          << "type = \"game\"\n"
+          << "title = \"Sigil\"\n"
+          << "base_game = \"doom2\"\n"
+          << "pwads = [\"SIGIL.WAD\"]\n"
+          << "pwad_sha1 = [\"" << sigil_sha1 << "\"]\n"
+          << "compat_level = 3\n"
+          << "requires_capability = [\"vanilla\"]\n";
+    }
+    {
+        std::ofstream f(sys_mods / "games" / "plutonia.toml");
+        f << "[plutonia]\n"
+          << "type = \"game\"\n"
+          << "title = \"Final Doom: Plutonia\"\n"
+          << "base_game = \"doom2\"\n"
+          << "pwads = [\"PLUTONIA.WAD\"]\n"
+          << "pwad_sha1 = [\"0000000000000000000000000000000000000000\"]\n"
+          << "compat_level = 4\n"
+          << "requires_capability = [\"vanilla\"]\n";
+    }
+
+    UserConfig cfg;
+    cfg.module_dirs = { sys_mods.string(), usr_mods.string() };
+    cfg.default_engine = "dsda-doom";
+
+    ModuleRegistry reg;
+    reg.set_user_config(cfg);
+    // Clear system search paths so only our test WADs are used
+    reg.get_wad_catalog().clear();
+    reg.set_asset_resolver(AssetResolver());
+    assert(reg.load_configured_modules());
+
+    // 1. Before adding any WADs, 0 modules are active
+    assert(reg.resolve_menu_items().empty());
+
+    // 2. Add renamed_doom2_release.wad -> matched by SHA-1 -> activates 'doom2' only!
+    const WadFile* wf_doom2_ptr = reg.register_wad_file(doom2_path.string());
+    assert(wf_doom2_ptr != nullptr);
+    WadFile wf_doom2 = *wf_doom2_ptr;
+    assert(reg.find_modules_for_wad(wf_doom2) == std::vector<std::string>{"doom2"});
+
+    auto items_after_doom2 = reg.resolve_menu_items();
+    assert(items_after_doom2.size() == 1);
+    assert(items_after_doom2[0].module_name == "doom2");
+    assert(items_after_doom2[0].resolved_iwad_path == wf_doom2.path);
+
+    // 3. Add my_sigil_download.wad -> matched by SHA-1 -> activates 'sigil'!
+    const WadFile* wf_sigil_ptr = reg.register_wad_file(sigil_path.string());
+    assert(wf_sigil_ptr != nullptr);
+    WadFile wf_sigil = *wf_sigil_ptr;
+    assert(reg.find_modules_for_wad(wf_sigil) == std::vector<std::string>{"sigil"});
+
+    auto items_after_sigil = reg.resolve_menu_items();
+    assert(items_after_sigil.size() == 2); // doom2 + sigil (plutonia remains inactive!)
+
+    // 4. Add Eviternity.wad -> no matching module exists yet -> find_modules_for_wad returns empty
+    const WadFile* wf_evit_ptr = reg.register_wad_file(eviternity_path.string());
+    assert(wf_evit_ptr != nullptr);
+    WadFile wf_evit = *wf_evit_ptr;
+    assert(reg.find_modules_for_wad(wf_evit).empty());
+
+    // 5. Create user module for Eviternity.wad -> writes to usr_mods/games/eviternity.toml and activates it!
+    UserModuleSpec spec;
+    spec.title = "Eviternity";
+    spec.base_game = "doom2";
+    spec.pwads = { wf_evit.filename };
+    spec.pwad_sha1 = { eviternity_sha1 };
+    spec.compat_level = "11";
+    spec.requires_capability = { "mbf" };
+
+    std::string created_toml_path;
+    assert(reg.create_user_module(spec, created_toml_path, usr_mods.string()));
+    assert(fs::exists(created_toml_path));
+    assert(reg.find_modules_for_wad(wf_evit) == std::vector<std::string>{"eviternity"});
+
+    auto items_after_create = reg.resolve_menu_items();
+    assert(items_after_create.size() == 3); // doom2, sigil, eviternity
+
+    bool found_evit = false;
+    for (const auto& it : items_after_create) {
+        if (it.module_name == "eviternity") {
+            found_evit = true;
+            assert(it.title == "Eviternity");
+            assert(it.cmd.find("-complevel 11") != std::string::npos);
+            assert(it.cmd.find(wf_evit.path) != std::string::npos);
+            assert(it.cmd.find(wf_doom2.path) != std::string::npos);
+        }
+    }
+    assert(found_evit);
+
+    fs::remove_all(wad_dir);
+    fs::remove_all(sys_mods);
+    fs::remove_all(usr_mods);
+
+    std::cout << "Phase 3 WAD-Driven Module Activation & User Module Creation Tests passed!" << std::endl << std::endl;
+}
+
 int main() {
     test_template_engine();
     test_module_registry();
@@ -1849,6 +2052,7 @@ int main() {
     test_gui_rendering_verification();
     test_phase1_multi_module_dirs_and_saves();
     test_phase2_wad_catalog_and_sha1();
+    test_phase3_wad_driven_module_activation();
     std::cout << "ALL TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;
 }

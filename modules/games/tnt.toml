@@ -3,5 +3,9 @@ type = "game"
 title = "Final Doom: TNT Evilution"
 base_game = "doom2"
 pwads = ["TNT.WAD"]
+pwad_sha1 = [
+    "9fbc66aedef7fe3bae0986cdb9323d2b8db4c9d3",
+    "4a65c8b960225505187c36040b41a40b152f8f3e"
+]
 compat_level = 4
 requires_capability = ["vanilla"]

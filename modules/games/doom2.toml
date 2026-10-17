@@ -2,5 +2,9 @@
 type = "game"
 title = "Doom II: Hell on Earth"
 iwad = "DOOM2.WAD"
+iwad_sha1 = [
+    "7ec7652fcfce8ddc6e801839291f0e28ef1d5ae7",
+    "30e3c2d0350b67bfbf47271970b74b2f6fb8ec8b"
+]
 compat_level = 2
 requires_capability = ["vanilla"]

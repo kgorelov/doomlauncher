@@ -2,27 +2,30 @@
 
 This document establishes the technical design and phased implementation roadmap for the architecture described in [`docs/2026-10-17-wads-modules-separation.md`](file:///home/kgorelov/git/doomlauncher/docs/2026-10-17-wads-modules-separation.md).
 
+> [!IMPORTANT]
+> **Design Principle — Simplicity Over Backward Compatibility**:
+> Because Doom Launcher has not been released yet, this plan drops all legacy config formats, variable aliases, `{{MODULE_DIR}}` asset resolution, and per-module `savedir` overrides in favor of a single, clean, canonical schema.
+
 ---
 
 ## 1. Objectives & Architectural Shift
 
-The goal of this redesign is to decouple **WAD files**, **Game Modules**, and **Save Directories**, inverting the control flow from module-centric directory structures to WAD-driven activation:
+The goal of this redesign is to completely decouple **WAD files**, **Game Modules**, and **Save Directories**, inverting the control flow from module-centric directory structures to WAD-driven activation:
 
 1. **Inversion of Control (WADs Activate Modules)**:
-   - Previously, every loaded game module appeared in the menu (often red/disabled if WADs were missing) and assumed WADs and `.saves` lived inside `{{MODULE_DIR}}`.
-   - Now, pre-installed and user modules act as a **knowledge base / library of game definitions**.
-   - The launcher discovers WADs from system directories, user `wad_dirs`, and explicitly added `iwads` / `wads`.
+   - Modules are strictly declarative game/mod definitions stored in system and user module directories. They never contain WAD files or save directories.
+   - The launcher discovers WADs from system directories, user `wad_dirs`, and explicitly added `iwads`.
    - A module becomes **active** (and appears as a menu entry) **if and only if** all of its required WAD dependencies (IWAD + PWADs) are satisfied by discovered WADs on the user's system.
 2. **Multi-Directory Module Loading**:
-   - `paths.modules` in `~/.config/doomlauncher/config.toml` becomes an array of directories, combining pre-installed system modules (`/usr/share/doomlauncher/modules`, `./modules`) and user-created modules (`~/.config/doomlauncher/modules`).
+   - `paths.modules` in `~/.config/doomlauncher/config.toml` is strictly an array of directories, loading pre-installed modules (`/usr/share/doomlauncher/modules`, `./modules`) and user-created modules (`~/.config/doomlauncher/modules`).
 3. **Centralized Save Directories**:
-   - Remove `savedir = "{{MODULE_DIR}}/.saves"` from modules.
-   - All save games automatically resolve to `~/.config/doomlauncher/saves/<module_name>/` (created on launch if not already present).
+   - Modules never define `savedir`.
+   - All save games automatically resolve to `~/.config/doomlauncher/saves/<module_name>/` (created automatically before launch).
 4. **SHA-1 WAD Identification & Caching**:
-   - Every discovered or added WAD has its SHA-1 hash computed (and cached by file path + `mtime` + file size in `state.toml` to keep startup fast).
-   - Modules can match WADs by **SHA-1 hash** (supporting multiple known revisions/releases of a WAD) with fallback to case-insensitive filename matching.
+   - Every discovered or added WAD has its SHA-1 hash computed (and cached by file path + `mtime` + file size in `state.toml` for instant startup).
+   - Modules match WADs by **SHA-1 hash** (or filename when SHA-1 is not specified in the module).
 5. **Interactive In-Launcher WAD Addition & Module Creation**:
-   - **Add WAD Dialog (`F5` or `+ Add WAD...` menu action)**: Built-in filesystem browser allowing the user to navigate directories, select one or multiple `.wad` / `.pk3` files, and add them to `~/.config/doomlauncher/config.toml`.
+   - **Add WAD Dialog (<kbd>F5</kbd>)**: Built-in filesystem browser allowing the user to navigate directories, select one or multiple `.wad` / `.pk3` files, and add them to `~/.config/doomlauncher/config.toml`.
    - **Automatic Module Matching**: Immediately after adding WAD(s), SHA-1 calculation and module discovery run. If a pre-installed or user module matches the added WAD(s), it activates immediately.
    - **Create Module Dialog**: If no existing module matches an added WAD, the launcher prompts the user with an interactive form to create a new module under `~/.config/doomlauncher/modules/games/<slug>.toml` (setting Title, Base IWAD / Dependencies with `DOOM2.WAD` and `DOOM.WAD` prioritized at the top, Compatibility Level, and Required Engine Capabilities).
 
@@ -34,7 +37,7 @@ The goal of this redesign is to decouple **WAD files**, **Game Modules**, and **
 |  [ WAD Discovery ]                         [ Module Library ]                     |
 |  - System default dirs                     - Pre-installed:                       |
 |  - config.toml: paths.wad_dirs               /usr/share/doomlauncher/modules      |
-|  - config.toml: [iwads] / paths.wads       - User-created:                        |
+|  - config.toml: [iwads]                    - User-created:                        |
 |         |                                    ~/.config/doomlauncher/modules       |
 |         v                                           |                             |
 |  +-------------------------------+                  |                             |
@@ -43,7 +46,7 @@ The goal of this redesign is to decouple **WAD files**, **Game Modules**, and **
 |         |                                           v                             |
 |         |            +-----------------------------------------------+            |
 |         +----------> |     Module Matcher & Dependency Resolver      |            |
-|                      |  - Matches WADs by SHA-1 (or filename)        |            |
+|                      |  - Matches WADs by SHA-1 / filename           |            |
 |                      |  - Checks base_game / requires chain          |            |
 |                      |  - Injects ~/.config/doomlauncher/saves/<mod> |            |
 |                      +-----------------------------------------------+            |
@@ -60,7 +63,7 @@ The goal of this redesign is to decouple **WAD files**, **Game Modules**, and **
 
 ---
 
-## 2. Configuration & State Specification
+## 2. Clean-Slate Configuration & State Schemas
 
 ### 2.1 User Config (`~/.config/doomlauncher/config.toml`)
 
@@ -79,7 +82,7 @@ wad_dirs = [
 ]
 
 [iwads]
-# Explicitly registered WAD files (added manually or via the "Add WAD" dialog)
+# Explicitly registered WAD files (added manually or via the F5 "Add WAD" dialog)
 doom = "/home/user/Games/Doom/DOOM.WAD"
 doom2 = "/home/user/Games/Doom/DOOM2.WAD"
 ancient_aliens = "/home/user/Downloads/aaliens.wad"
@@ -89,20 +92,19 @@ default_engine = "dsda-doom"
 osd_font = "mono"
 ```
 
-- **Backward Compatibility**:
-  - In [`AssetResolver::load_config`](file:///home/kgorelov/git/doomlauncher/src/asset_resolver.cpp), `paths.modules` will accept **both** a `toml::array` of strings (`std::vector<std::string> module_dirs`) and a single `toml::value<std::string>` for legacy configs.
+- **Removed Legacy Baggage**:
+  - Remove single-string `paths.modules_path` and `UserConfig::modules_path`; use `std::vector<std::string> module_dirs` exclusively.
   - Default `module_dirs` when not specified in `config.toml`:
-    1. `/usr/share/doomlauncher/modules` (if exists)
-    2. `/usr/local/share/doomlauncher/modules` (if exists)
-    3. `./modules` (local repo/portable fallback, if exists)
-    4. `~/.config/doomlauncher/modules` (always included; auto-created when saving user modules)
-  - Modules loaded from later directories (e.g., `~/.config/doomlauncher/modules`) override modules of the same name from earlier directories.
+    1. `/usr/share/doomlauncher/modules`
+    2. `./modules`
+    3. `~/.config/doomlauncher/modules`
+  - Modules loaded from later directories override modules of the same name from earlier directories.
 - **Persisting Config Changes**:
-  - Add `AssetResolver::save_config(const UserConfig& config, const std::string& explicit_path = "")` so the "Add WAD" dialog can non-destructively add newly selected WAD paths into `[iwads]` (or `paths.wad_dirs`) in `~/.config/doomlauncher/config.toml`.
+  - `AssetResolver::save_config(const UserConfig& config, const std::string& explicit_path = "")` writes the updated `UserConfig` to `~/.config/doomlauncher/config.toml` when the user adds WADs via the UI.
 
 ### 2.2 State & SHA-1 Cache (`~/.config/doomlauncher/state.toml`)
 
-Calculating SHA-1 across gigabytes of WADs on every startup could introduce latency if uncached. `state.toml` will store both per-module engine selections and a lightweight SHA-1 cache keyed by canonical file path, file size, and last modification timestamp (`mtime`):
+`state.toml` stores per-module engine selections and a SHA-1 cache keyed by canonical file path, file size, and last modification timestamp (`mtime`):
 
 ```toml
 [engines]
@@ -116,32 +118,81 @@ mtime = 1729180000
 sha1 = "7ec7652fcfce8ddc6e801839291f0e28ef1d5ae7"
 ```
 
+### 2.3 Canonical Module Schema (`modules/games/*.toml` & `modules/engines/*.toml`)
+
+Drop legacy `[vars]`, `[templates]`, `{{MODULE_DIR}}`, `savedir`, and duplicate uppercase/lowercase variable aliases. Standardize on a single set of fields:
+
+#### Game Module (`modules/games/doom2.toml`)
+```toml
+[doom2]
+type = "game"
+title = "Doom II: Hell on Earth"
+iwad = "DOOM2.WAD"
+iwad_sha1 = [
+    "7ec7652fcfce8ddc6e801839291f0e28ef1d5ae7", # v1.9
+    "30e3c2d0350b67bfbf47271970b74b2f6fb8ec8b"  # BFG Edition
+]
+compat_level = 2
+requires_capability = ["vanilla"]
+```
+
+#### Mod / PWAD Module (`modules/games/sigil.toml`)
+```toml
+[sigil]
+type = "game"
+title = "Sigil"
+base_game = "doom"
+pwads = ["SIGIL.WAD"]
+pwad_sha1 = [
+    "c19ce88f5dc9f2cab6f4fbd7db1eb6ab4f00b892"
+]
+compat_level = 3
+requires_capability = ["vanilla"]
+```
+
+#### Engine Module (`modules/engines/dsda_doom.toml`)
+```toml
+[dsda-doom]
+type = "engine"
+title = "DSDA-Doom"
+binary = "dsda-doom"
+binaries = ["dsda-doom"]
+capabilities = ["vanilla", "limit-removing", "boom", "mbf", "mbf21", "complevel"]
+cmd = "{{BIN}} -iwad {{IWAD}} {% if COMPAT_LEVEL %}-complevel {{COMPAT_LEVEL}}{% endif %}{% if PWADS %}{% for wad in PWADS %} -file {{wad}}{% endfor %}{% endif %} -savedir {{SAVEDIR}}"
+```
+
+Standardized template variables injected for engine command rendering:
+- `{{BIN}}`: Resolved engine executable path
+- `{{IWAD}}`: Resolved absolute path to the IWAD file
+- `{{PWADS}}`: Array of resolved absolute paths to PWAD files
+- `{{COMPAT_LEVEL}}`: Compatibility level string (if defined)
+- `{{SAVEDIR}}`: `~/.config/doomlauncher/saves/<module_name>`
+
 ---
 
 ## 3. Component Design
 
 ### 3.1 Built-in SHA-1 & WAD Catalog (`src/wad_catalog.h`, `src/wad_catalog.cpp`)
 
-To avoid external OpenSSL/crypto library build dependencies, implement a self-contained, zero-dependency RFC 3174 `sha1` utility (~120 lines of C++17) inside `doomlauncher::WadCatalog`.
+Implement a self-contained RFC 3174 `sha1` utility (~120 lines of C++17) inside `doomlauncher::WadCatalog` with zero external library dependencies.
 
-#### Data Structures
 ```cpp
 namespace doomlauncher {
 
 struct WadFile {
-    std::string path;           // Canonical/normalized absolute path
-    std::string filename;       // e.g. "DOOM2.WAD"
-    std::string stem_lower;     // e.g. "doom2"
-    std::string sha1;           // 40-char lowercase hex SHA-1 digest
+    std::string path;            // Canonical absolute path
+    std::string filename;        // e.g. "DOOM2.WAD"
+    std::string stem_lower;      // e.g. "doom2"
+    std::string sha1;            // 40-char lowercase hex SHA-1 digest
     uintmax_t file_size = 0;
     int64_t mtime = 0;
-    bool is_iwad_header = false; // True if first 4 bytes == "IWAD" (vs "PWAD" or PK3)
+    bool is_iwad_header = false; // True if first 4 bytes == "IWAD"
 };
 
 class WadCatalog {
 public:
-    void scan_directories(const std::vector<std::string>& dirs);
-    const WadFile* add_wad_file(const std::string& filepath);
+    void scan_From_config(const UserConfig& config);
+    const WadFile* add_wad_file(const std::string& filepath, const std::string& alias = "");
 
     const WadFile* find_by_sha1(const std::string& sha1) const;
     const WadFile* find_by_filename(const std::string& filename) const;
@@ -158,7 +209,7 @@ public:
 ```
 
 - **WAD Header Inspection (`IWAD` vs `PWAD`)**:
-  - Reading the first 4 bytes of `.wad` files (`"IWAD"` vs `"PWAD"`) allows the catalog to automatically identify base IWADs vs patch PWADs when populating the dependency selector in the "Create Module" dialog.
+  - Reads the first 4 bytes of `.wad` files (`"IWAD"` vs `"PWAD"`) to identify base IWADs vs patch PWADs.
 - **Prioritized Dependency List (`get_prioritized_dependency_wads`)**:
   - Returns all known WADs sorted with main IWADs at the very top:
     1. `DOOM2.WAD` (`doom2`)
@@ -169,68 +220,46 @@ public:
 
 ---
 
-### 3.2 Module Definition & SHA-1 Matching (`src/config_module.h`, `src/config_module.cpp`)
+### 3.2 Module Matching, Activation & Centralized Saves (`src/config_module.h`, `src/config_module.cpp`)
 
-#### Module Schema Enhancements
-Modules in `/usr/share/doomlauncher/modules/games/*.toml` and `~/.config/doomlauncher/modules/games/*.toml` no longer specify `savedir` and can declare expected SHA-1 hashes alongside filenames:
+#### Simplified `Module` Struct
+```cpp
+struct Module {
+    std::string name;
+    std::string title;
+    std::string type;                  // "game" or "engine"
+    std::string base_game;             // e.g. "doom2" or "doom"
+    std::vector<std::string> requires; // Additional module dependencies
 
-```toml
-[doom2]
-type = "game"
-title = "Doom II: Hell on Earth"
-iwad = "DOOM2.WAD"
-iwad_sha1 = [
-    "7ec7652fcfce8ddc6e801839291f0e28ef1d5ae7", # v1.9
-    "30e3c2d0350b67bfbf47271970b74b2f6fb8ec8b"  # BFG Edition
-]
-compat_level = 2
-requires_capability = ["vanilla"]
-```
+    std::string iwad;
+    std::vector<std::string> iwad_sha1;
+    std::vector<std::string> pwads;
+    std::vector<std::string> pwad_sha1;
 
-```toml
-[sigil]
-type = "game"
-title = "Sigil"
-base_game = "doom"
-pwads = ["SIGIL.WAD"]
-pwad_sha1 = [
-    "c19ce88f5dc9f2cab6f4fbd7db1eb6ab4f00b892" # v1.21
-]
-compat_level = 3
-requires_capability = ["vanilla"]
+    std::string compat_level;
+    std::vector<std::string> requires_capability;
+};
 ```
 
 #### Matching & Activation Rules in `ModuleRegistry::resolve_menu_items()`
 1. **IWAD Resolution**:
-   - If the module specifies `iwad_sha1` (string or array of strings), `WadCatalog` searches for a discovered WAD matching any listed SHA-1 hash.
-   - If not matched by SHA-1 (or `iwad_sha1` is omitted/empty), fallback to `WadCatalog::find_by_filename(iwad)` / `AssetResolver::resolve(iwad)`.
+   - Inherit `iwad` / `iwad_sha1` from `base_game` if not defined on the module itself.
+   - If `iwad_sha1` is non-empty, look up each hash in `WadCatalog::find_by_sha1()`.
+   - If not matched by SHA-1 (or `iwad_sha1` is empty), look up `iwad` via `WadCatalog::find_by_filename()` / `find_by_alias()`.
 2. **PWAD Resolution**:
-   - For each PWAD entry (or `pwad_sha1` list), match against `WadCatalog` by SHA-1 first, then by filename/path via `AssetResolver`.
-3. **Dependency Satisfaction & Visibility Filter**:
-   - A module's `base_game` / `requires` modules must also have their WAD requirements satisfied.
-   - **Activation Rule**: Only modules whose IWAD and PWAD requirements are **all found** (`assets_found == true`) become active and are returned in `resolve_menu_items()` as visible menu entries. Modules for WADs the user does not own remain hidden.
-4. **Unmatched WAD Detection**:
-   - Provide `ModuleRegistry::find_modules_for_wad(const WadFile& wad)` which checks if any registered module references `wad.sha1` or `wad.filename` as its primary asset (`pwads` if the module has a `base_game`, or `iwad` if standalone).
-   - Used immediately after the user adds WAD(s) in the UI to decide whether to activate an existing module or open the **Create Module** dialog.
+   - Collect PWADs from any required dependency modules first, followed by the module's own `pwads` / `pwad_sha1`.
+   - Match against `WadCatalog` by SHA-1 first, then by filename/alias.
+3. **Activation Filter**:
+   - A module is **activated** if and only if its IWAD and all required PWADs resolve to existing files in `WadCatalog`.
+   - Unsatisfied modules are omitted from the menu.
+4. **Centralized Save Directory**:
+   - Set `item.save_dir = get_module_save_dir(mod.name)` (`~/.config/doomlauncher/saves/<module_name>`).
+   - Inject `SAVEDIR` into the template scope for engine command generation.
+   - In [`Menu::launchSelected()`](file:///home/kgorelov/git/doomlauncher/src/menu.cpp), call `std::filesystem::create_directories(item.save_dir)` before executing the command.
 
 ---
 
-### 3.3 Centralized Save Directories
-
-- Every active module automatically receives:
-  ```
-  ~/.config/doomlauncher/saves/<module_name>
-  ```
-  (respecting `$XDG_CONFIG_HOME/doomlauncher/saves/<module_name>` if `$XDG_CONFIG_HOME` is set).
-- In `ModuleRegistry::resolve_menu_items()`:
-  - If `merged_scope` does not explicitly override `savedir` (or if it uses legacy `{{MODULE_DIR}}/.saves`), set `SAVEDIR` and `savedir` to `ModuleRegistry::get_module_save_dir(mod.name)`.
-- In [`Menu::launchSelected()`](file:///home/kgorelov/git/doomlauncher/src/menu.cpp):
-  - Before invoking `std::system(cmd.c_str())`, ensure `std::filesystem::create_directories(save_dir)` is called so engines like `dsda-doom`, `boom`, `chocolate-doom`, and `gzdoom` never fail due to a missing target directory.
-- Update all built-in game modules (`modules/games/doom1.toml`, `doom2.toml`, `plutonia.toml`, `tnt.toml`, `sigil.toml`) to remove `savedir = "{{MODULE_DIR}}/.saves"`.
-
----
-
-### 3.4 UI Dialogs: "Add WAD" Browser & "Create Module" Form (`src/menu.h`, `src/menu.cpp`)
+### 3.3 UI Dialogs: "Add WAD" Browser & "Create Module" Form (`src/menu.h`, `src/menu.cpp`)
 
 Extend `OverlayState` in [`src/menu.h`](file:///home/kgorelov/git/doomlauncher/src/menu.h):
 
@@ -260,27 +289,24 @@ enum class OverlayState {
 |   [ ] scythe2.wad                                            (14.7 MB)   |
 |                                                                          |
 | Selected: 1 file(s)                                                      |
-| [ Up/Down: Navigate | Space: Select/Toggle | Enter: Open Dir / Confirm ] |
+| [ Up/Down: Navigate | Space: Toggle Select | Enter: Open Dir / Confirm ] |
 | [ A: Confirm Selected | Esc: Cancel ]                                    |
 +--------------------------------------------------------------------------+
 ```
 - **Navigation & Controls**:
-  - Starts in the last browsed directory, the first configured `wad_dir`, or `$HOME`.
-  - Lists `[..]` (parent directory), subdirectories `[DIR]`, and `.wad` / `.pk3` / `.zip` files (case-insensitive extension filter).
-  - `Up` / `Down` / `PageUp` / `PageDown`: Move cursor through directory entries.
-  - `Space`: Toggle selection checkbox `[x]` on a WAD file (supports selecting single or multiple WADs).
+  - Lists `[..]` (parent directory), subdirectories `[DIR]`, and `.wad` / `.pk3` files.
+  - `Up` / `Down` / `PageUp` / `PageDown`: Navigate entries.
+  - `Space`: Toggle selection `[x]` on one or multiple WAD files.
   - `Enter`:
     - On `[..]` or `[DIR]`: enters that directory.
-    - On a file: if no files are multi-selected with `Space`, selects that single file and triggers **Add & Discover**; if files are already marked `[x]`, confirms all marked files.
-  - `A` (or `F2`): Confirms all currently selected `[x]` WAD files.
-  - `Esc` / `F5`: Cancels and returns to the main menu.
+    - On a WAD file: if no files are multi-selected, selects that file and confirms; if files are already marked `[x]`, confirms all marked files.
+  - `A`: Confirms all marked `[x]` WAD files.
+  - `Esc` / `F5`: Cancels and closes dialog.
 - **Post-Selection Flow**:
-  1. Selected WAD file(s) are registered in `UserConfig.iwads` (persisted to `~/.config/doomlauncher/config.toml`) and hashed via `WadCatalog::add_wad_file()` (cached in `state.toml`).
-  2. `ModuleRegistry` runs module discovery across all loaded modules.
-  3. **Case A — Matching Module Found**:
-     - Re-resolves menu items (`resolve_menu_items()`), selects the newly activated module in the menu, and displays OSD status: `"Activated module '<Title>' for <filename>"`.
-  4. **Case B — No Matching Module Found**:
-     - Transitions directly to `OverlayState::CreateModuleForm` pre-populated with the selected WAD file(s).
+  1. Adds the selected WAD file(s) to `UserConfig.iwads` (saved to `~/.config/doomlauncher/config.toml`) and indexes/hashes them in `WadCatalog` (cached in `state.toml`).
+  2. Checks if any loaded module matches the newly added WAD(s) (by SHA-1 or filename).
+  3. **If a module is found**: re-runs `resolve_menu_items()`, highlights the newly activated entry, and shows `"Activated module '<Title>'"`.
+  4. **If no module is found**: opens `OverlayState::CreateModuleForm` for the added WAD(s).
 
 #### 2. Create Module Form Dialog (`OverlayState::CreateModuleForm`)
 ```
@@ -290,7 +316,7 @@ enum class OverlayState {
 |   WAD File(s):       Eviternity.wad (SHA1: 8f3a91c4...)                  |
 | > Title:             Eviternity_                                         |
 |   Base WAD (IWAD):   < DOOM2.WAD (/home/user/Games/Doom/DOOM2.WAD) >     |
-|   Extra Dependencies:[ None ] (Enter to select from known WADs)          |
+|   Extra Dependencies:[ None ] (Enter to toggle known WADs)               |
 |   Complevel:         < 11 (MBF) >                                        |
 |   Engine Capability: < mbf >                                             |
 |                                                                          |
@@ -301,83 +327,62 @@ enum class OverlayState {
 +--------------------------------------------------------------------------+
 ```
 - **Form Fields**:
-  1. **Title** (editable text input via `SDL_TEXTINPUT` / `SDLK_BACKSPACE`, initialized to a human-readable title derived from the WAD filename stem, e.g., `eviternity.wad` -> `"Eviternity"`).
-  2. **Base WAD / IWAD Dependency**:
-     - Cycles through discovered IWADs/WADs from `WadCatalog::get_prioritized_dependency_wads()`, with **`DOOM2.WAD`** and **`DOOM.WAD`** prioritized first, plus a `(Standalone IWAD)` option if the added WAD is itself an IWAD.
-  3. **Additional WAD Dependencies**:
-     - Optional multi-select toggle list of other known WADs if the module needs extra PWADs loaded before it.
-  4. **Compatibility Level (`compat_level`)**:
-     - Cycles through standard Doom complevels:
-       - `Default / Auto`
-       - `2 (Doom II v1.9)`
-       - `3 (Ultimate Doom)`
-       - `4 (Final Doom)`
-       - `9 (Boom)`
-       - `11 (MBF)`
-       - `21 (MBF21)`
-  5. **Engine Capability / Supported Engines (`requires_capability`)**:
-     - Auto-synced when `compat_level` changes, or manually cycled via `Left`/`Right`:
-       - `vanilla` (All engines)
-       - `limit-removing`
-       - `boom` (DSDA-Doom, Boom, GZDoom)
-       - `mbf` (DSDA-Doom, Boom, GZDoom)
-       - `mbf21` (DSDA-Doom, GZDoom)
-       - `gzdoom` (GZDoom only)
-  6. **`[ SAVE & ACTIVATE MODULE ]` Button**:
-     - Writes `~/.config/doomlauncher/modules/games/<slug>.toml` containing `title`, `base_game` / `iwad`, `pwads`, `pwad_sha1`, `compat_level`, and `requires_capability`.
-     - Reloads the module into `ModuleRegistry`, refreshes the menu items, highlights the new game entry, and shows `"Created module ~/.config/doomlauncher/modules/games/<slug>.toml"`.
+  1. **Title**: Text input (`SDL_TEXTINPUT` / `SDLK_BACKSPACE`), pre-filled from the WAD filename stem.
+  2. **Base WAD (IWAD)**: Cycles through `WadCatalog::get_prioritized_dependency_wads()` (`DOOM2.WAD` and `DOOM.WAD` first, plus `(Standalone IWAD)` if the WAD itself has an `"IWAD"` header).
+  3. **Extra Dependencies**: Optional selection of additional known WADs.
+  4. **Complevel**: Cycles `Default`, `2 (Doom v1.9)`, `3 (Ultimate Doom)`, `4 (Final Doom)`, `9 (Boom)`, `11 (MBF)`, `21 (MBF21)`.
+  5. **Engine Capability**: Cycles `vanilla`, `limit-removing`, `boom`, `mbf`, `mbf21`, `gzdoom`.
+  6. **`[ SAVE & ACTIVATE MODULE ]`**: Writes `~/.config/doomlauncher/modules/games/<slug>.toml` (including the WAD's `pwad_sha1` / `iwad_sha1`), reloads modules, refreshes the menu, and selects the newly created game.
 
 ---
 
 ## 4. Phased Implementation Roadmap
 
-### Phase 1: Config Array Support & Centralized Save Directories
-- Update [`UserConfig`](file:///home/kgorelov/git/doomlauncher/src/asset_resolver.h) to store `std::vector<std::string> module_dirs` (supporting both `modules = [...]` array and legacy string in `config.toml`) and `std::vector<std::string> manual_wads`.
-- Implement `AssetResolver::save_config()` to persist `[paths]`, `[iwads]`, and `[preferences]` to `~/.config/doomlauncher/config.toml`.
-- Implement `ModuleRegistry::get_default_user_modules_dir()` (`~/.config/doomlauncher/modules`) and `ModuleRegistry::get_module_save_dir(module_name)` (`~/.config/doomlauncher/saves/<module_name>`).
-- Automatically inject `SAVEDIR` = `~/.config/doomlauncher/saves/<module_name>` during module resolution and create the directory prior to game launch.
-- Remove `savedir = "{{MODULE_DIR}}/.saves"` from `modules/games/*.toml`.
+### Phase 1: Clean Config Schema, Module Directory Array & Centralized Saves
+- Replace `modules_path` in [`UserConfig`](file:///home/kgorelov/git/doomlauncher/src/asset_resolver.h) with `std::vector<std::string> module_dirs`.
+- Implement `AssetResolver::save_config()` to write `~/.config/doomlauncher/config.toml`.
+- Standardize engine templates (`modules/engines/*.toml`) to use `{{BIN}}`, `{{IWAD}}`, `{{PWADS}}`, `{{COMPAT_LEVEL}}`, and `{{SAVEDIR}}`.
+- Remove `savedir` from `modules/games/*.toml` and remove `{{MODULE_DIR}}` expansion and legacy variable aliases from [`src/config_module.cpp`](file:///home/kgorelov/git/doomlauncher/src/config_module.cpp).
+- Route all module save directories to `~/.config/doomlauncher/saves/<module_name>/` and create on launch.
 
 ### Phase 2: SHA-1 Hashing, WAD Catalog & Cache Persistence
 - Create `src/wad_catalog.h` and `src/wad_catalog.cpp`:
-  - Implement RFC 3174 SHA-1 hashing (`WadCatalog::compute_file_sha1`).
-  - Implement WAD header check (`IWAD` vs `PWAD` magic bytes).
-  - Implement directory scanning across default system paths + user `wad_dirs` + explicit `[iwads]` entries.
-  - Implement `WadCatalog` SHA-1 cache serialization in `state.toml` (`[wad_cache]`) keyed by path, file size, and `mtime`.
-  - Implement prioritized WAD sorting (`DOOM2.WAD` and `DOOM.WAD` at the top of the dependency list).
+  - Built-in RFC 3174 SHA-1 implementation.
+  - WAD header inspection (`IWAD` vs `PWAD`).
+  - Directory scanning across default system paths + user `wad_dirs` + explicit `[iwads]`.
+  - `[wad_cache]` persistence in `state.toml`.
+  - Prioritized dependency sorting (`DOOM2.WAD` and `DOOM.WAD` at top).
 
-### Phase 3: Inverse Control Flow & SHA-1 Module Activation
-- Extend [`Module`](file:///home/kgorelov/git/doomlauncher/src/config_module.h) to parse `iwad_sha1`, `pwad_sha1`, and `sha1` fields (supporting single string or array of strings).
-- Update [`ModuleRegistry::resolve_menu_items()`](file:///home/kgorelov/git/doomlauncher/src/config_module.cpp):
-  - Resolve module WAD requirements against `WadCatalog` (by SHA-1 first, then filename/alias).
-  - Filter `resolve_menu_items()` so only modules whose WAD dependencies are satisfied become active menu items (with an optional flag `include_inactive = false` for internal inspection/testing).
-- Add `ModuleRegistry::find_modules_for_wad(const WadFile& wad)` and `ModuleRegistry::create_user_module(...)` which writes `~/.config/doomlauncher/modules/games/<name>.toml`.
-- Update [`src/main.cpp`](file:///home/kgorelov/git/doomlauncher/src/main.cpp) to load all configured `module_dirs` (system pre-installed + `~/.config/doomlauncher/modules`).
+### Phase 3: WAD-Driven Module Activation & User Module Creation
+- Update [`ModuleRegistry`](file:///home/kgorelov/git/doomlauncher/src/config_module.h) to load modules from all directories in `UserConfig::module_dirs` (system pre-installed + `~/.config/doomlauncher/modules`).
+- Match module WAD requirements against `WadCatalog` via `iwad_sha1` / `pwad_sha1` and filename.
+- Activate and return only satisfied modules in `resolve_menu_items()`.
+- Implement `ModuleRegistry::create_user_module()` to write `~/.config/doomlauncher/modules/games/<slug>.toml`.
 
 ### Phase 4: Interactive "Add WAD" & "Create Module" UI Dialogs
-- Add `OverlayState::AddWadDialog` and `OverlayState::CreateModuleForm` to [`Menu`](file:///home/kgorelov/git/doomlauncher/src/menu.h).
-- Bind <kbd>F5</kbd> (and update the F1 Help overlay and OSD shortcut bar) to open the **Add WAD** filesystem browser dialog.
-- Implement directory traversal, `.wad`/`.pk3` filtering, multi-file selection (`Space`), and confirmation (`Enter` / `A`) in `Menu`.
-- Wire post-selection WAD hashing, config persistence, and automatic module activation.
-- Implement the **Create Module** modal form when an added WAD has no matching module, including text input for Title, prioritized IWAD dependency picker (`doom2.wad` and `doom.wad` at top), complevel selector, and capability selector.
+- Add `OverlayState::AddWadDialog` (<kbd>F5</kbd>) and `OverlayState::CreateModuleForm` to [`Menu`](file:///home/kgorelov/git/doomlauncher/src/menu.h).
+- Implement filesystem navigation, `.wad`/`.pk3` filtering, multi-file selection, and config saving.
+- Connect post-add module matching: activate existing module if matched, or transition to `CreateModuleForm` if unmatched.
+- Update F1 Help overlay and bottom OSD shortcut hint bar (`F5: Add WAD`).
 
 ### Phase 5: Unit Tests & Verification
-- Add comprehensive tests in [`src/test_config.cpp`](file:///home/kgorelov/git/doomlauncher/src/test_config.cpp):
-  - SHA-1 calculation and `state.toml` cache hit/invalidation tests.
-  - `config.toml` array `modules = [...]` loading and saving tests.
-  - Centralized save directory (`~/.config/doomlauncher/saves/<module_name>`) resolution tests.
-  - Inverse control flow tests: modules only activate when their required WADs (matched by SHA-1 or filename) are present in `WadCatalog`.
-  - Prioritized dependency ordering test (`DOOM2.WAD` and `DOOM.WAD` first).
-  - User module generation and TOML serialization test (`~/.config/doomlauncher/modules/games/<slug>.toml`).
+- Update [`src/test_config.cpp`](file:///home/kgorelov/git/doomlauncher/src/test_config.cpp) to test the clean-slate architecture:
+  - SHA-1 calculation and `[wad_cache]` persistence in `state.toml`.
+  - `config.toml` array `modules = [...]` and `[iwads]` loading/saving.
+  - Centralized save directory (`~/.config/doomlauncher/saves/<module_name>`) injection.
+  - WAD-driven module activation (modules activate only when their required WADs are present, matched by SHA-1 or filename).
+  - Prioritized dependency ordering (`DOOM2.WAD` and `DOOM.WAD` first).
+  - User module creation and activation flow.
 
 ---
 
 ## 5. Execution Checklist
 
-- [ ] **Step 1: Config & Save Directory Separation**
-  - [ ] Support `modules` array in `UserConfig` and `AssetResolver::load_config()` / `save_config()`.
-  - [ ] Route all module save directories to `~/.config/doomlauncher/saves/<modulename>/` and auto-create on launch.
-  - [ ] Strip legacy `savedir = "{{MODULE_DIR}}/.saves"` from `modules/games/*.toml`.
+- [ ] **Step 1: Clean Config & Save Directory Separation**
+  - [ ] Replace `modules_path` with `module_dirs` array in `UserConfig` and implement `AssetResolver::save_config()`.
+  - [ ] Remove legacy variable aliases and `{{MODULE_DIR}}` from `config_module.cpp`.
+  - [ ] Standardize `modules/engines/*.toml` and `modules/games/*.toml` (remove `savedir`).
+  - [ ] Route all save directories to `~/.config/doomlauncher/saves/<modulename>/` and auto-create on launch.
 - [ ] **Step 2: WAD Catalog & SHA-1 Engine**
   - [ ] Implement `src/wad_catalog.h` and `src/wad_catalog.cpp` with built-in SHA-1 calculation and `[wad_cache]` in `state.toml`.
   - [ ] Implement prioritized dependency list placing `doom2.wad` and `doom.wad` at the top.
@@ -390,5 +395,5 @@ enum class OverlayState {
   - [ ] Implement `OverlayState::CreateModuleForm` (interactive dialog for unmatched WADs).
   - [ ] Update F1 Help and OSD hints with `F5: Add WAD`.
 - [ ] **Step 5: Testing & Build Verification**
-  - [ ] Add unit tests in `src/test_config.cpp` for SHA-1 matching, module activation, save dirs, and module creation.
+  - [ ] Update unit tests in `src/test_config.cpp` for the simplified schema, SHA-1 matching, module activation, save dirs, and module creation.
   - [ ] Verify clean compilation with `-Wall -Wextra` and 100% test pass rate.

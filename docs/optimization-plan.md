@@ -265,26 +265,27 @@ flowchart TD
 
 ---
 
-## 5. Expected Impact Summary
+## 5. Measured Impact Summary (Phases 1–4)
 
-| Metric | Current (`build/doomlauncher`) | After Phase 1 (VSync + Pacing) | After Phases 1–4 (Full Plan) |
-| :--- | :---: | :---: | :---: |
-| **Steady-State CPU Usage** | **96.2% – 97.8%** (100% 1 core) | ~45% – 55% | **< 1.5% – 3.0%** |
-| **Frame Rate** | 102 – 113 FPS (uncapped busy loop) | 60 FPS (VSync / capped) | **60 FPS locked** (30 Hz sim tick) |
-| **Frame CPU Time (1080p)** | **9.40 ms / frame** | 9.40 ms / frame | **< 0.25 ms / frame** (~38x reduction) |
-| **`Fire` CPU Time / Frame** | 7.79 ms / frame | 7.79 ms / frame | **< 0.10 ms / frame** (~78x reduction) |
-| **`Menu` CPU Time / Frame** | 1.41 ms / frame (4.5 ms modal) | 1.41 ms / frame | **< 0.03 ms / frame** (~47x reduction) |
-| **GPU Texture Allocations / Sec** | **900 – 3,300 textures/sec** | 540 – 1,980 textures/sec | **0 textures/sec** (steady state) |
-| **Startup CPU Time** | 246.6 ms | 246.6 ms | **< 40 ms** (~6x reduction) |
+| Metric | Baseline (`build/doomlauncher`) | After Phase 1 (VSync + Pacing) | After Phase 2 (`Fire` Opt) | After Phase 3 (`Menu` Cache) | After Phase 4 (Release + `Sky`/Cache) |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Total Process CPU Usage** | **96.2% – 97.8%** | 50.1% | 16.0% | 7.5% | **5.9%** *(1.1% app + 4.8% GL driver)* |
+| **Frame Rate** | 102.2 – 113.4 FPS (uncapped) | 60.06 FPS | 60.26 FPS | 60.09 FPS | **60.35 FPS locked** (30 Hz sim) |
+| **Application CPU / Frame** | **9.23 ms / frame** | 8.22 ms / frame | 2.13 ms / frame | 0.28 ms / frame | **0.18 ms / frame** (**51x reduction**) |
+| **`Fire` Pixel Fill CPU / Frame** | 5,917.1 µs / frame | 5,244.6 µs / frame | 115.4 µs / frame | 95.3 µs / frame | **73.8 µs / frame** (**80x faster**) |
+| **`Fire::update()` CPU / Frame** | 1,450.5 µs / frame | ~725 µs / frame | 156.1 µs / frame | 71.5 µs / frame | **22.3 µs / frame** (**65x faster**) |
+| **`Menu::render()` CPU / Frame** | 1,411.2 µs / frame | 1,705.4 µs / frame | 1,748.0 µs / frame | 87.9 µs / frame | **68.3 µs / frame** (*33.0 µs/f steady state*) |
+| **GPU Texture Allocations / Sec** | **920 – 3,300 / sec** | 540 – 1,980 / sec | 540 – 1,980 / sec | **0 / sec** (steady state) | **0 / sec** (steady state) |
+| **`Fire` + `Sky` Init Wall Time** | 145.52 ms | 128.59 ms | 156.43 ms | 163.92 ms | **15.38 ms** (**9.5x faster**) |
+| **Fonts + Config + WAD Init** | 14.22 ms | 6.33 ms | 7.10 ms | 7.02 ms | **4.33 ms** (**3.3x faster**) |
 
 ---
 
-## 6. Verification Plan
+## 6. Verification Summary
 
 1. **Automated Unit Tests**:
-   - Build and run `./build/test_config` to verify all configuration, WAD catalog caching, and menu state unit tests continue to pass.
+   - All 18 test suites in `./build/test_config` pass with assertions enabled (`-UNDEBUG`).
 2. **Profiling Benchmark Comparison**:
-   - Re-run the `LD_PRELOAD` phase & `SIGPROF` profiler over 600 frames on the optimized binary and verify:
-     - `TTF_RenderText_Solid` and `SDL_CreateTextureFromSurface` drop from `9.0 calls/frame` to `0.0 calls/frame` after the first frame.
-     - Frame CPU time drops from `~9.4 ms/frame` to `<0.3 ms/frame`.
-     - Overall process CPU utilization drops from `~97%` to `<3%`.
+   - `TTF_RenderText_Solid` and `SDL_CreateTextureFromSurface` dropped from `9.0 calls/frame` (`2,700` calls per 300 frames) to `9 calls total` on Frame 1 (`0.0 calls/frame` steady state).
+   - `doomlauncher` binary self-CPU samples over 300 frames dropped from **4,560 samples** to **26 samples** (**175x reduction**).
+   - Application CPU time dropped from `9.23 ms/frame` to `0.18 ms/frame` (**51x reduction**), and total process CPU utilization (including OpenGL/Mesa VSync swap & texture upload) dropped from **96.2%–97.8%** to **5.9%**.

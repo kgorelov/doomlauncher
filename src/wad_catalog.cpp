@@ -268,6 +268,7 @@ const WadFile* WadCatalog::add_wad_file(const std::string& filepath, const std::
             entry.mtime = wf.mtime;
             entry.sha1 = wf.sha1;
             sha1_cache[path_str] = entry;
+            cache_dirty = true;
         }
     }
 
@@ -491,6 +492,7 @@ bool WadCatalog::load_cache(const std::string& state_filepath) {
                 }
             }
         }
+        cache_dirty = false;
         return true;
     } catch (const toml::parse_error& err) {
         std::cerr << "Warning: Error parsing wad_cache from state file '" << resolved_path << "': " << err << std::endl;
@@ -499,6 +501,10 @@ bool WadCatalog::load_cache(const std::string& state_filepath) {
 }
 
 bool WadCatalog::save_cache(const std::string& state_filepath) const {
+    if (!cache_dirty && state_filepath.empty()) {
+        return true;
+    }
+
     std::string path_str = state_filepath.empty() ? ModuleRegistry::get_default_state_path() : state_filepath;
     std::string resolved_path = AssetResolver::expand_path(path_str);
 
@@ -535,6 +541,7 @@ bool WadCatalog::save_cache(const std::string& state_filepath) const {
             return false;
         }
         out << tbl << "\n";
+        cache_dirty = false;
         return true;
     } catch (const std::exception& e) {
         std::cerr << "Warning: Failed to save wad_cache to '" << resolved_path << "': " << e.what() << std::endl;

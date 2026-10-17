@@ -56,6 +56,7 @@ public:
     // SHA-1 cache persistence in state.toml ([wad_cache])
     bool load_cache(const std::string& state_filepath = "");
     bool save_cache(const std::string& state_filepath = "") const;
+    bool is_cache_dirty() const { return cache_dirty; }
     const std::unordered_map<std::string, WadCacheEntry>& get_cache() const;
 
     // Static utilities
@@ -72,6 +73,7 @@ private:
     std::unordered_map<std::string, size_t> index_by_stem_lower;
     std::unordered_map<std::string, size_t> index_by_alias_lower;
     std::unordered_map<std::string, WadCacheEntry> sha1_cache;
+    mutable bool cache_dirty = false;
 };
 
 } // namespace doomlauncher

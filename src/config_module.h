@@ -4,6 +4,7 @@
 #include "asset_resolver.h"
 #include "engine_registry.h"
 #include "template_engine.h"
+#include "wad_catalog.h"
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -13,14 +14,33 @@ namespace doomlauncher {
 struct Module {
     std::string name;
     std::string title;
-    std::string module_dir;
     std::string type;
+    std::string base_game;
 
     std::vector<std::string> requires;
     std::vector<std::string> includes;
+
+    std::string iwad;
+    std::vector<std::string> iwad_sha1;
+    std::vector<std::string> pwads;
+    std::vector<std::string> pwad_sha1;
+
+    std::string compat_level;
     std::vector<std::string> requires_capability;
 
     Scope vars;
+};
+
+struct UserModuleSpec {
+    std::string name;
+    std::string title;
+    std::string base_game;
+    std::string iwad;
+    std::vector<std::string> iwad_sha1;
+    std::vector<std::string> pwads;
+    std::vector<std::string> pwad_sha1;
+    std::string compat_level;
+    std::vector<std::string> requires_capability;
 };
 
 enum class GameStatus {
@@ -33,6 +53,7 @@ struct ResolvedMenuItem {
     std::string module_name;
     std::string title;
     std::string cmd;
+    std::string save_dir;
     Scope vars;
 
     GameStatus status = GameStatus::Ready;
@@ -60,6 +81,7 @@ public:
 
     bool load_file(const std::string& filepath);
     bool load_directory(const std::string& dirpath);
+    bool load_configured_modules();
     bool load_user_config(const std::string& config_path = "");
 
     bool load_state(const std::string& filepath = "");
@@ -72,11 +94,19 @@ public:
     void apply_saved_state(std::vector<ResolvedMenuItem>& items) const;
 
     static std::string get_default_state_path();
+    static std::string get_default_saves_root();
+    static std::string get_module_save_dir(const std::string& module_name);
+    static std::string get_default_user_modules_dir();
+    static std::string sanitize_module_slug(const std::string& input);
     static bool save_state_from_items(const std::vector<ResolvedMenuItem>& items, std::string& out_saved_path, const std::string& filepath = "");
 
     void set_asset_resolver(const AssetResolver& resolver);
     AssetResolver& get_asset_resolver();
     const AssetResolver& get_asset_resolver() const;
+
+    void set_wad_catalog(const WadCatalog& catalog);
+    WadCatalog& get_wad_catalog();
+    const WadCatalog& get_wad_catalog() const;
 
     void set_engine_registry(const EngineRegistry& registry);
     EngineRegistry& get_engine_registry();
@@ -89,12 +119,23 @@ public:
     const Module* get_module(const std::string& name) const;
     bool has_module(const std::string& name) const;
 
-    std::vector<ResolvedMenuItem> resolve_menu_items();
+    // Registers a WAD file in WadCatalog + UserConfig, optionally saving config.toml
+    const WadFile* register_wad_file(const std::string& filepath, bool persist_config = false, const std::string& config_path = "");
+
+    // Returns names of registered game modules whose primary WAD matches the given WadFile (by SHA-1 or filename)
+    std::vector<std::string> find_modules_for_wad(const WadFile& wad) const;
+
+    // Creates a new user module TOML file under ~/.config/doomlauncher/modules/games/<slug>.toml and loads it
+    bool create_user_module(const UserModuleSpec& spec, std::string& out_filepath, const std::string& target_dir = "");
+
+    // Resolves menu items. By default (only_active = true), only returns modules whose WAD requirements are satisfied.
+    std::vector<ResolvedMenuItem> resolve_menu_items(bool only_active = true);
 
 private:
     std::unordered_map<std::string, Module> modules;
     std::unordered_map<std::string, std::string> saved_engines;
     AssetResolver asset_resolver;
+    WadCatalog wad_catalog;
     EngineRegistry engine_registry;
     UserConfig user_config;
 

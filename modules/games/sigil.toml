@@ -3,5 +3,9 @@ type = "game"
 title = "Sigil"
 base_game = "doom"
 pwads = ["SIGIL.WAD"]
+pwad_sha1 = [
+    "c19ce88f5dc9f2cab6f4fbd7db1eb6ab4f00b892",
+    "b2d3c52ff8fd3fa9fb3bf91b86097a2e41e7bc18"
+]
 compat_level = 3
 requires_capability = ["vanilla"]

@@ -3,5 +3,8 @@ type = "game"
 title = "Final Doom: The Plutonia Experiment"
 base_game = "doom2"
 pwads = ["PLUTONIA.WAD"]
+pwad_sha1 = [
+    "90361e2a538d2388506657252ae41aceeb1ba360"
+]
 compat_level = 4
 requires_capability = ["vanilla"]

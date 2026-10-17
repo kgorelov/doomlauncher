@@ -2,6 +2,9 @@
 type = "game"
 title = "The Ultimate Doom"
 iwad = "DOOM.WAD"
+iwad_sha1 = [
+    "7742089b4468a736cadb659a7deca3320fe6d8e9",
+    "9b07b02ab3c275a6a7570c3f73cc20d63a0e3833"
+]
 compat_level = 3
 requires_capability = ["vanilla"]
-savedir = "{{MODULE_DIR}}/.saves"

@@ -1,6 +1,7 @@
 #include "config_module.h"
 #include "toml.hpp"
 #include <algorithm>
+#include <cctype>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -13,6 +14,14 @@ namespace doomlauncher {
 namespace {
 
 namespace fs = std::filesystem;
+
+std::string to_lower(const std::string& str) {
+    std::string lower = str;
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) {
+        return std::tolower(c);
+    });
+    return lower;
+}
 
 Value parse_toml_node(const toml::node& node) {
     if (auto s = node.as_string()) {
@@ -33,6 +42,21 @@ Value parse_toml_node(const toml::node& node) {
     return Value();
 }
 
+void parse_string_or_array(const toml::node* node, std::vector<std::string>& out, bool lowercase = false) {
+    if (!node) return;
+    if (auto arr = node->as_array()) {
+        for (const auto& elem : *arr) {
+            if (auto s = elem.as_string()) {
+                std::string val(s->get());
+                out.push_back(lowercase ? to_lower(val) : val);
+            }
+        }
+    } else if (auto s = node->as_string()) {
+        std::string val(s->get());
+        out.push_back(lowercase ? to_lower(val) : val);
+    }
+}
+
 std::vector<std::string> expand_glob_pattern(const std::string& pattern) {
     std::vector<std::string> filenames;
     glob_t glob_result;
@@ -48,54 +72,12 @@ std::vector<std::string> expand_glob_pattern(const std::string& pattern) {
     return filenames;
 }
 
-void parse_single_module_table(const toml::table& tbl, Module& mod, const std::string& module_name, const std::string& dir_path) {
+void parse_single_module_table(const toml::table& tbl, Module& mod, const std::string& module_name) {
     mod.name = module_name;
-    mod.module_dir = dir_path;
 
     if (auto title_node = tbl.get("title")) {
         if (auto s = title_node->as_string()) {
             mod.title = std::string(s->get());
-        }
-    }
-
-    if (auto req_node = tbl.get("requires")) {
-        if (auto arr = req_node->as_array()) {
-            for (const auto& elem : *arr) {
-                if (auto s = elem.as_string()) {
-                    mod.requires.push_back(std::string(s->get()));
-                }
-            }
-        }
-    }
-
-    if (auto inc_node = tbl.get("includes")) {
-        if (auto arr = inc_node->as_array()) {
-            for (const auto& elem : *arr) {
-                if (auto s = elem.as_string()) {
-                    mod.includes.push_back(std::string(s->get()));
-                }
-            }
-        }
-    }
-
-    if (auto vars_tbl = tbl.get_as<toml::table>("vars")) {
-        for (const auto& [key, val] : *vars_tbl) {
-            mod.vars[std::string(key.str())] = parse_toml_node(val);
-        }
-    }
-
-    if (auto tmpl_tbl = tbl.get_as<toml::table>("templates")) {
-        for (const auto& [key, val] : *tmpl_tbl) {
-            mod.vars[std::string(key.str())] = parse_toml_node(val);
-        }
-    }
-
-    if (auto base_node = tbl.get("base_game")) {
-        if (auto s = base_node->as_string()) {
-            std::string bg = std::string(s->get());
-            if (!bg.empty() && std::find(mod.requires.begin(), mod.requires.end(), bg) == mod.requires.end()) {
-                mod.requires.push_back(bg);
-            }
         }
     }
 
@@ -105,87 +87,47 @@ void parse_single_module_table(const toml::table& tbl, Module& mod, const std::s
         }
     }
 
-    if (auto req_cap = tbl.get("requires_capability")) {
-        if (auto arr = req_cap->as_array()) {
-            for (const auto& elem : *arr) {
-                if (auto s = elem.as_string()) {
-                    mod.requires_capability.push_back(std::string(s->get()));
-                }
+    parse_string_or_array(tbl.get("requires"), mod.requires);
+
+    if (auto base_node = tbl.get("base_game")) {
+        if (auto s = base_node->as_string()) {
+            mod.base_game = std::string(s->get());
+            if (!mod.base_game.empty() &&
+                std::find(mod.requires.begin(), mod.requires.end(), mod.base_game) == mod.requires.end()) {
+                mod.requires.push_back(mod.base_game);
             }
-        } else if (auto s = req_cap->as_string()) {
-            mod.requires_capability.push_back(std::string(s->get()));
         }
     }
+
+    parse_string_or_array(tbl.get("includes"), mod.includes);
+
+    if (auto iwad_node = tbl.get("iwad")) {
+        if (auto s = iwad_node->as_string()) {
+            mod.iwad = std::string(s->get());
+        }
+    }
+
+    parse_string_or_array(tbl.get("iwad_sha1"), mod.iwad_sha1, true);
+    parse_string_or_array(tbl.get("pwads"), mod.pwads, false);
+    parse_string_or_array(tbl.get("pwad_sha1"), mod.pwad_sha1, true);
+    parse_string_or_array(tbl.get("sha1"), mod.pwad_sha1, true);
+
+    if (auto cl_node = tbl.get("compat_level")) {
+        mod.compat_level = parse_toml_node(*cl_node).to_string();
+    }
+
+    parse_string_or_array(tbl.get("requires_capability"), mod.requires_capability);
 
     for (const auto& [key, val] : tbl) {
         std::string k_str(key.str());
-        if (k_str == "name" || k_str == "title" || k_str == "is_menu_item" || k_str == "menu_item" ||
-            k_str == "requires" || k_str == "includes" || k_str == "vars" || k_str == "templates" || k_str == "modules" ||
-            k_str == "type" || k_str == "requires_capability" || k_str == "base_game") {
+        if (k_str == "title" || k_str == "type" || k_str == "requires" || k_str == "base_game" ||
+            k_str == "includes" || k_str == "iwad" || k_str == "iwad_sha1" ||
+            k_str == "pwads" || k_str == "pwad_sha1" || k_str == "sha1" ||
+            k_str == "compat_level" || k_str == "requires_capability") {
             continue;
         }
-
         mod.vars[k_str] = parse_toml_node(val);
     }
-
-    // Populate alias keys for convenience and backward compatibility
-    if (mod.vars.find("iwad") != mod.vars.end() && mod.vars.find("IWAD_PATH") == mod.vars.end()) {
-        mod.vars["IWAD_PATH"] = mod.vars["iwad"];
-        mod.vars["IWAD"] = mod.vars["iwad"];
-    } else if (mod.vars.find("IWAD_PATH") != mod.vars.end() && mod.vars.find("iwad") == mod.vars.end()) {
-        mod.vars["iwad"] = mod.vars["IWAD_PATH"];
-        mod.vars["IWAD"] = mod.vars["IWAD_PATH"];
-    }
-
-    if (mod.vars.find("pwads") != mod.vars.end()) {
-        if (mod.vars["pwads"].type == Value::Type::String) {
-            mod.vars["pwads"] = Value(Array{mod.vars["pwads"]});
-        }
-        mod.vars["PWADS"] = mod.vars["pwads"];
-    } else if (mod.vars.find("PWADS") != mod.vars.end()) {
-        if (mod.vars["PWADS"].type == Value::Type::String) {
-            mod.vars["PWADS"] = Value(Array{mod.vars["PWADS"]});
-        }
-        mod.vars["pwads"] = mod.vars["PWADS"];
-    }
-
-    if (mod.vars.find("compat_level") != mod.vars.end() && mod.vars.find("COMPAT_LEVEL") == mod.vars.end()) {
-        mod.vars["COMPAT_LEVEL"] = mod.vars["compat_level"];
-    } else if (mod.vars.find("COMPAT_LEVEL") != mod.vars.end() && mod.vars.find("compat_level") == mod.vars.end()) {
-        mod.vars["compat_level"] = mod.vars["COMPAT_LEVEL"];
-    }
-
-    if (mod.vars.find("savedir") != mod.vars.end() && mod.vars.find("SAVEDIR") == mod.vars.end()) {
-        mod.vars["SAVEDIR"] = mod.vars["savedir"];
-    } else if (mod.vars.find("SAVEDIR") != mod.vars.end() && mod.vars.find("savedir") == mod.vars.end()) {
-        mod.vars["savedir"] = mod.vars["SAVEDIR"];
-    }
-}
-
-std::string expand_module_dir(const std::string& text, const std::string& module_dir) {
-    std::string result = text;
-    std::string keys[2] = {"{{MODULE_DIR}}", "{{MODULEDIR}}"};
-    for (const auto& k : keys) {
-        size_t pos = 0;
-        while ((pos = result.find(k, pos)) != std::string::npos) {
-            result.replace(pos, k.length(), module_dir);
-            pos += module_dir.length();
-        }
-    }
-    return result;
-}
-
-Value expand_value_module_dir(const Value& val, const std::string& module_dir) {
-    if (val.type == Value::Type::String) {
-        return Value(expand_module_dir(val.str_val, module_dir));
-    } else if (val.type == Value::Type::Array) {
-        Array res_arr;
-        for (const auto& elem : val.arr_val) {
-            res_arr.push_back(expand_value_module_dir(elem, module_dir));
-        }
-        return Value(res_arr);
-    }
-    return val;
 }
 
 } // namespace
@@ -215,14 +157,9 @@ std::string ResolvedMenuItem::get_command_for_engine(size_t engine_idx) const {
     Scope eng_scope = vars;
     std::string bin_path = eng.installed_binary_path.empty() ? eng.binary : eng.installed_binary_path;
     eng_scope["BIN"] = Value(bin_path);
-    std::string upper_name = eng.name;
-    std::transform(upper_name.begin(), upper_name.end(), upper_name.begin(), ::toupper);
-    eng_scope[upper_name + "_BIN"] = Value(bin_path);
 
     if (!resolved_iwad_path.empty()) {
-        eng_scope["IWAD_PATH"] = Value(resolved_iwad_path);
         eng_scope["IWAD"] = Value(resolved_iwad_path);
-        eng_scope["iwad"] = Value(resolved_iwad_path);
     }
     if (!resolved_pwad_paths.empty()) {
         Array pwads_arr;
@@ -230,13 +167,13 @@ std::string ResolvedMenuItem::get_command_for_engine(size_t engine_idx) const {
             pwads_arr.push_back(Value(p));
         }
         eng_scope["PWADS"] = Value(pwads_arr);
-        eng_scope["pwads"] = Value(pwads_arr);
+    }
+    if (!save_dir.empty()) {
+        eng_scope["SAVEDIR"] = Value(save_dir);
     }
 
     for (const auto& [k, v] : eng.vars) {
-        if (k == "BIN" || k == upper_name + "_BIN" || k == eng.name + "_BIN") {
-            continue;
-        }
+        if (k == "BIN") continue;
         if (eng_scope.find(k) == eng_scope.end()) {
             eng_scope[k] = v;
         }
@@ -299,15 +236,31 @@ const AssetResolver& ModuleRegistry::get_asset_resolver() const {
     return asset_resolver;
 }
 
+void ModuleRegistry::set_wad_catalog(const WadCatalog& catalog) {
+    wad_catalog = catalog;
+}
+
+WadCatalog& ModuleRegistry::get_wad_catalog() {
+    return wad_catalog;
+}
+
+const WadCatalog& ModuleRegistry::get_wad_catalog() const {
+    return wad_catalog;
+}
+
 bool ModuleRegistry::load_user_config(const std::string& config_path) {
     user_config = AssetResolver::load_config(config_path);
     asset_resolver = AssetResolver(user_config);
+    wad_catalog.clear();
+    wad_catalog.scan_from_config(user_config, true);
     return true;
 }
 
 void ModuleRegistry::set_user_config(const UserConfig& config) {
     user_config = config;
     asset_resolver = AssetResolver(user_config);
+    wad_catalog.clear();
+    wad_catalog.scan_from_config(user_config, true);
 }
 
 const UserConfig& ModuleRegistry::get_user_config() const {
@@ -324,6 +277,58 @@ std::string ModuleRegistry::get_default_state_path() {
         return std::string(xdg_cfg) + "/doomlauncher/state.toml";
     }
     return AssetResolver::expand_path("~/.config/doomlauncher/state.toml");
+}
+
+std::string ModuleRegistry::get_default_saves_root() {
+    const char* env_saves = std::getenv("DOOMLAUNCHER_SAVES");
+    if (env_saves && *env_saves) {
+        return AssetResolver::expand_path(env_saves);
+    }
+    const char* xdg_cfg = std::getenv("XDG_CONFIG_HOME");
+    if (xdg_cfg && *xdg_cfg) {
+        return std::string(xdg_cfg) + "/doomlauncher/saves";
+    }
+    return AssetResolver::expand_path("~/.config/doomlauncher/saves");
+}
+
+std::string ModuleRegistry::get_module_save_dir(const std::string& module_name) {
+    return (fs::path(get_default_saves_root()) / module_name).lexically_normal().string();
+}
+
+std::string ModuleRegistry::get_default_user_modules_dir() {
+    const char* env_mods = std::getenv("DOOMLAUNCHER_USER_MODULES");
+    if (env_mods && *env_mods) {
+        return AssetResolver::expand_path(env_mods);
+    }
+    const char* xdg_cfg = std::getenv("XDG_CONFIG_HOME");
+    if (xdg_cfg && *xdg_cfg) {
+        return std::string(xdg_cfg) + "/doomlauncher/modules";
+    }
+    return AssetResolver::expand_path("~/.config/doomlauncher/modules");
+}
+
+std::string ModuleRegistry::sanitize_module_slug(const std::string& input) {
+    std::string base = fs::path(input).stem().string();
+    if (base.empty()) base = input;
+
+    std::string slug;
+    bool prev_underscore = false;
+    for (unsigned char c : base) {
+        if (std::isalnum(c)) {
+            slug.push_back(static_cast<char>(std::tolower(c)));
+            prev_underscore = false;
+        } else if (!slug.empty() && !prev_underscore) {
+            slug.push_back('_');
+            prev_underscore = true;
+        }
+    }
+    while (!slug.empty() && slug.back() == '_') {
+        slug.pop_back();
+    }
+    if (slug.empty()) {
+        slug = "custom_wad";
+    }
+    return slug;
 }
 
 bool ModuleRegistry::load_state(const std::string& filepath) {
@@ -344,6 +349,7 @@ bool ModuleRegistry::load_state(const std::string& filepath) {
                 }
             }
         }
+        wad_catalog.load_cache(resolved_path);
         return true;
     } catch (const toml::parse_error& err) {
         std::cerr << "Warning: Error parsing state file '" << resolved_path << "': " << err << std::endl;
@@ -383,6 +389,9 @@ bool ModuleRegistry::save_state(const std::string& filepath) const {
             return false;
         }
         out << tbl << "\n";
+        out.close();
+
+        wad_catalog.save_cache(resolved_path);
         return true;
     } catch (const std::exception& e) {
         std::cerr << "Warning: Failed to save state to '" << resolved_path << "': " << e.what() << std::endl;
@@ -461,6 +470,143 @@ bool ModuleRegistry::has_module(const std::string& name) const {
     return modules.find(name) != modules.end();
 }
 
+const WadFile* ModuleRegistry::register_wad_file(const std::string& filepath, bool persist_config, const std::string& config_path) {
+    fs::path p(AssetResolver::expand_path(filepath));
+    std::string alias = to_lower(p.stem().string());
+    const WadFile* wf = wad_catalog.add_wad_file(filepath, alias);
+    if (!wf) {
+        return nullptr;
+    }
+
+    user_config.iwads[alias] = wf->path;
+    asset_resolver.set_iwad_alias(alias, wf->path);
+    asset_resolver.set_iwad_alias(wf->filename, wf->path);
+
+    if (persist_config) {
+        AssetResolver::save_config(user_config, config_path);
+    }
+    return wf;
+}
+
+std::vector<std::string> ModuleRegistry::find_modules_for_wad(const WadFile& wad) const {
+    std::vector<std::string> matched;
+
+    for (const auto& [name, mod] : modules) {
+        if (mod.title.empty() || mod.type == "engine") continue;
+
+        bool is_match = false;
+        if (!mod.pwads.empty() || !mod.pwad_sha1.empty()) {
+            // Addon/PWAD module: check pwad_sha1 and pwads
+            for (const auto& h : mod.pwad_sha1) {
+                if (!wad.sha1.empty() && AssetResolver::iequals(h, wad.sha1)) {
+                    is_match = true;
+                    break;
+                }
+            }
+            if (!is_match) {
+                for (const auto& p : mod.pwads) {
+                    std::string p_fn = fs::path(p).filename().string();
+                    if (AssetResolver::iequals(p_fn, wad.filename) ||
+                        AssetResolver::iequals(fs::path(p).stem().string(), wad.stem_lower)) {
+                        is_match = true;
+                        break;
+                    }
+                }
+            }
+        } else {
+            // Standalone IWAD module: check iwad_sha1 and iwad
+            for (const auto& h : mod.iwad_sha1) {
+                if (!wad.sha1.empty() && AssetResolver::iequals(h, wad.sha1)) {
+                    is_match = true;
+                    break;
+                }
+            }
+            if (!is_match && !mod.iwad.empty()) {
+                std::string i_fn = fs::path(mod.iwad).filename().string();
+                if (AssetResolver::iequals(i_fn, wad.filename) ||
+                    AssetResolver::iequals(fs::path(mod.iwad).stem().string(), wad.stem_lower)) {
+                    is_match = true;
+                }
+            }
+        }
+
+        if (is_match) {
+            matched.push_back(name);
+        }
+    }
+
+    std::sort(matched.begin(), matched.end());
+    return matched;
+}
+
+bool ModuleRegistry::create_user_module(const UserModuleSpec& spec, std::string& out_filepath, const std::string& target_dir) {
+    std::string slug = spec.name.empty() ? sanitize_module_slug(spec.title) : sanitize_module_slug(spec.name);
+    std::string base_dir = target_dir.empty() ? get_default_user_modules_dir() : AssetResolver::expand_path(target_dir);
+    fs::path games_dir = fs::path(base_dir) / "games";
+
+    std::error_code ec;
+    fs::create_directories(games_dir, ec);
+
+    fs::path file_path = games_dir / (slug + ".toml");
+    out_filepath = file_path.lexically_normal().string();
+
+    try {
+        toml::table mod_tbl;
+        mod_tbl.insert_or_assign("type", "game");
+        mod_tbl.insert_or_assign("title", spec.title.empty() ? slug : spec.title);
+
+        if (!spec.base_game.empty()) {
+            mod_tbl.insert_or_assign("base_game", spec.base_game);
+        }
+        if (!spec.iwad.empty()) {
+            mod_tbl.insert_or_assign("iwad", spec.iwad);
+        }
+        if (!spec.iwad_sha1.empty()) {
+            toml::array arr;
+            for (const auto& h : spec.iwad_sha1) arr.push_back(to_lower(h));
+            mod_tbl.insert_or_assign("iwad_sha1", arr);
+        }
+        if (!spec.pwads.empty()) {
+            toml::array arr;
+            for (const auto& p : spec.pwads) arr.push_back(p);
+            mod_tbl.insert_or_assign("pwads", arr);
+        }
+        if (!spec.pwad_sha1.empty()) {
+            toml::array arr;
+            for (const auto& h : spec.pwad_sha1) arr.push_back(to_lower(h));
+            mod_tbl.insert_or_assign("pwad_sha1", arr);
+        }
+        if (!spec.compat_level.empty()) {
+            try {
+                int64_t cl_int = std::stoll(spec.compat_level);
+                mod_tbl.insert_or_assign("compat_level", cl_int);
+            } catch (...) {
+                mod_tbl.insert_or_assign("compat_level", spec.compat_level);
+            }
+        }
+        if (!spec.requires_capability.empty()) {
+            toml::array arr;
+            for (const auto& c : spec.requires_capability) arr.push_back(c);
+            mod_tbl.insert_or_assign("requires_capability", arr);
+        }
+
+        toml::table root;
+        root.insert_or_assign(slug, mod_tbl);
+
+        std::ofstream out(out_filepath);
+        if (!out.is_open()) {
+            return false;
+        }
+        out << root << "\n";
+        out.close();
+
+        return load_file(out_filepath);
+    } catch (const std::exception& e) {
+        std::cerr << "Error creating user module '" << out_filepath << "': " << e.what() << std::endl;
+        return false;
+    }
+}
+
 bool ModuleRegistry::load_file(const std::string& filepath) {
     toml::table root;
     try {
@@ -493,20 +639,10 @@ bool ModuleRegistry::load_file(const std::string& filepath) {
                 }
             }
             if (mod.vars.find("cmd") != mod.vars.end()) eng.cmd_template = mod.vars.at("cmd").to_string();
-            else if (mod.vars.find("CMD") != mod.vars.end()) eng.cmd_template = mod.vars.at("CMD").to_string();
             eng.vars = mod.vars;
 
             if (eng.binary.empty() && eng.binaries.empty()) {
-                std::string upper_name = eng.name;
-                std::transform(upper_name.begin(), upper_name.end(), upper_name.begin(), ::toupper);
-                std::string bin_var = upper_name + "_BIN";
-                if (eng.vars.find(bin_var) != eng.vars.end()) {
-                    eng.binary = eng.vars[bin_var].to_string();
-                } else if (eng.vars.find("BIN") != eng.vars.end()) {
-                    eng.binary = eng.vars["BIN"].to_string();
-                } else {
-                    eng.binary = eng.name;
-                }
+                eng.binary = eng.name;
             }
             if (eng.capabilities.empty()) {
                 eng.capabilities.push_back("vanilla");
@@ -518,7 +654,7 @@ bool ModuleRegistry::load_file(const std::string& filepath) {
     for (const auto& [key, val] : root) {
         if (auto mod_tbl = val.as_table()) {
             Module mod;
-            parse_single_module_table(*mod_tbl, mod, std::string(key.str()), dir_path);
+            parse_single_module_table(*mod_tbl, mod, std::string(key.str()));
             add_module(mod);
             loaded_modules_in_file.push_back(mod);
             maybe_register_engine(mod);
@@ -527,7 +663,7 @@ bool ModuleRegistry::load_file(const std::string& filepath) {
 
     if (loaded_modules_in_file.empty()) {
         Module mod;
-        parse_single_module_table(root, mod, abs_p.stem().string(), dir_path);
+        parse_single_module_table(root, mod, abs_p.stem().string());
         add_module(mod);
         loaded_modules_in_file.push_back(mod);
         maybe_register_engine(mod);
@@ -556,20 +692,55 @@ bool ModuleRegistry::load_file(const std::string& filepath) {
 }
 
 bool ModuleRegistry::load_directory(const std::string& dirpath) {
-    fs::path p(dirpath);
-    if (!fs::exists(p) || !fs::is_directory(p)) {
+    fs::path p(AssetResolver::expand_path(dirpath));
+    std::error_code ec;
+    if (!fs::exists(p, ec) || !fs::is_directory(p, ec)) {
         return false;
     }
 
-    std::string pattern = (p / "*.toml").string();
-    std::vector<std::string> files = expand_glob_pattern(pattern);
-    bool success = true;
-    for (const auto& file : files) {
-        if (!load_file(file)) {
-            success = false;
+    bool any_loaded = false;
+    for (const auto& sub : {"engines", "games"}) {
+        fs::path sub_dir = p / sub;
+        if (fs::exists(sub_dir, ec) && fs::is_directory(sub_dir, ec)) {
+            std::vector<std::string> sub_files = expand_glob_pattern((sub_dir / "*.toml").string());
+            for (const auto& file : sub_files) {
+                if (load_file(file)) {
+                    any_loaded = true;
+                }
+            }
         }
     }
-    return success;
+
+    std::vector<std::string> files = expand_glob_pattern((p / "*.toml").string());
+    for (const auto& file : files) {
+        if (load_file(file)) {
+            any_loaded = true;
+        }
+    }
+    return any_loaded;
+}
+
+bool ModuleRegistry::load_configured_modules() {
+    std::vector<std::string> dirs = user_config.module_dirs;
+    if (dirs.empty()) {
+        dirs = AssetResolver::get_default_module_dirs();
+    }
+
+    bool any_loaded = false;
+    for (const auto& dir : dirs) {
+        std::string expanded = AssetResolver::expand_path(dir);
+        std::error_code ec;
+        if (fs::is_directory(expanded, ec)) {
+            if (load_directory(expanded)) {
+                any_loaded = true;
+            }
+        } else if (fs::exists(expanded, ec)) {
+            if (load_file(expanded)) {
+                any_loaded = true;
+            }
+        }
+    }
+    return any_loaded;
 }
 
 void ModuleRegistry::resolve_dependencies_recursive(
@@ -602,8 +773,20 @@ void ModuleRegistry::resolve_dependencies_recursive(
     ordered_deps.push_back(module_name);
 }
 
-std::vector<ResolvedMenuItem> ModuleRegistry::resolve_menu_items() {
+std::vector<ResolvedMenuItem> ModuleRegistry::resolve_menu_items(bool only_active) {
     std::vector<ResolvedMenuItem> items;
+
+    auto resolve_single_asset = [&](const std::string& name_or_path, const std::vector<std::string>& sha1_list) -> std::string {
+        // 1. Check WadCatalog (SHA-1 match first, then alias/filename)
+        if (const WadFile* wf = wad_catalog.resolve_wad(name_or_path, sha1_list)) {
+            return wf->path;
+        }
+        // 2. Fallback to AssetResolver search dirs/aliases
+        if (!name_or_path.empty()) {
+            return asset_resolver.resolve(name_or_path);
+        }
+        return "";
+    };
 
     for (const auto& [name, mod] : modules) {
         if (mod.title.empty() || mod.type == "engine") {
@@ -622,115 +805,98 @@ std::vector<ResolvedMenuItem> ModuleRegistry::resolve_menu_items() {
         }
 
         Scope merged_scope;
+        std::string effective_iwad;
+        std::vector<std::string> effective_iwad_sha1;
+        struct PwadReq {
+            std::string name;
+            std::vector<std::string> sha1_list;
+        };
+        std::vector<PwadReq> effective_pwads;
+        std::string effective_compat_level;
 
         for (const auto& dep_name : ordered_deps) {
             const Module* dep_mod = get_module(dep_name);
             if (!dep_mod) continue;
 
-            Scope dir_scope;
-            dir_scope["MODULE_DIR"] = Value(dep_mod->module_dir);
-            dir_scope["MODULEDIR"] = Value(dep_mod->module_dir);
-            dir_scope["MODULE_NAME"] = Value(dep_mod->name);
-            dir_scope["MODULENAME"] = Value(dep_mod->name);
-            dir_scope[dep_mod->name + ".MODULE_DIR"] = Value(dep_mod->module_dir);
-            dir_scope[dep_mod->name + ".MODULEDIR"] = Value(dep_mod->module_dir);
-
+            if (!dep_mod->iwad.empty() || !dep_mod->iwad_sha1.empty()) {
+                effective_iwad = dep_mod->iwad;
+                effective_iwad_sha1 = dep_mod->iwad_sha1;
+            }
+            if (!dep_mod->pwads.empty()) {
+                for (size_t i = 0; i < dep_mod->pwads.size(); ++i) {
+                    PwadReq req;
+                    req.name = dep_mod->pwads[i];
+                    if (dep_mod->pwads.size() == 1) {
+                        req.sha1_list = dep_mod->pwad_sha1;
+                    } else if (i < dep_mod->pwad_sha1.size()) {
+                        req.sha1_list = { dep_mod->pwad_sha1[i] };
+                    }
+                    effective_pwads.push_back(req);
+                }
+            } else if (!dep_mod->pwad_sha1.empty()) {
+                PwadReq req;
+                req.sha1_list = dep_mod->pwad_sha1;
+                effective_pwads.push_back(req);
+            }
+            if (!dep_mod->compat_level.empty()) {
+                effective_compat_level = dep_mod->compat_level;
+            }
             for (const auto& [k, v] : dep_mod->vars) {
-                merged_scope[k] = expand_value_module_dir(v, dep_mod->module_dir);
+                merged_scope[k] = v;
             }
         }
-
-        // Target module overrides
-        merged_scope["MODULE_DIR"] = Value(mod.module_dir);
-        merged_scope["MODULEDIR"] = Value(mod.module_dir);
-        merged_scope["MODULE_NAME"] = Value(mod.name);
-        merged_scope["MODULENAME"] = Value(mod.name);
 
         ResolvedMenuItem item;
         item.module_name = mod.name;
         item.title = mod.title;
+        item.save_dir = get_module_save_dir(mod.name);
 
-        // 1. Initial template interpolation of asset variables
-        std::string iwad_key;
-        if (merged_scope.find("IWAD_PATH") != merged_scope.end()) iwad_key = "IWAD_PATH";
-        else if (merged_scope.find("IWAD") != merged_scope.end()) iwad_key = "IWAD";
-        else if (merged_scope.find("iwad") != merged_scope.end()) iwad_key = "iwad";
-
-        if (!iwad_key.empty() && merged_scope[iwad_key].type == Value::Type::String) {
-            merged_scope[iwad_key] = Value(TemplateEngine::render(merged_scope[iwad_key].str_val, merged_scope));
+        merged_scope["SAVEDIR"] = Value(item.save_dir);
+        if (!effective_compat_level.empty()) {
+            merged_scope["COMPAT_LEVEL"] = Value(effective_compat_level);
         }
 
-        std::string pwad_key;
-        if (merged_scope.find("PWADS") != merged_scope.end()) pwad_key = "PWADS";
-        else if (merged_scope.find("pwads") != merged_scope.end()) pwad_key = "pwads";
-
-        if (!pwad_key.empty()) {
-            if (merged_scope[pwad_key].type == Value::Type::Array) {
-                Array arr;
-                for (const auto& elem : merged_scope[pwad_key].arr_val) {
-                    if (elem.type == Value::Type::String) {
-                        arr.push_back(Value(TemplateEngine::render(elem.str_val, merged_scope)));
-                    } else {
-                        arr.push_back(elem);
-                    }
-                }
-                merged_scope[pwad_key] = Value(arr);
-            } else if (merged_scope[pwad_key].type == Value::Type::String) {
-                merged_scope[pwad_key] = Value(TemplateEngine::render(merged_scope[pwad_key].str_val, merged_scope));
+        // Resolve IWAD
+        if (!effective_iwad.empty() || !effective_iwad_sha1.empty()) {
+            std::string raw_iwad = TemplateEngine::render(effective_iwad, merged_scope);
+            std::string resolved = resolve_single_asset(raw_iwad, effective_iwad_sha1);
+            if (!resolved.empty()) {
+                item.resolved_iwad_path = resolved;
+                merged_scope["IWAD"] = Value(resolved);
+            } else {
+                item.assets_found = false;
+                std::string missing_label = !raw_iwad.empty() ? raw_iwad : effective_iwad_sha1[0];
+                item.missing_assets.push_back(missing_label);
+                merged_scope["IWAD"] = Value(missing_label);
             }
         }
 
-        // 2. Asset resolution step
-        if (!iwad_key.empty()) {
-            std::string raw_iwad = merged_scope[iwad_key].to_string();
-            if (!raw_iwad.empty()) {
-                std::string resolved = asset_resolver.resolve(raw_iwad, mod.module_dir);
+        // Resolve PWADs
+        if (!effective_pwads.empty()) {
+            Array resolved_arr;
+            for (const auto& req : effective_pwads) {
+                std::string raw_pwad = TemplateEngine::render(req.name, merged_scope);
+                std::string resolved = resolve_single_asset(raw_pwad, req.sha1_list);
                 if (!resolved.empty()) {
-                    item.resolved_iwad_path = resolved;
-                    merged_scope["IWAD_PATH"] = Value(resolved);
-                    merged_scope["IWAD"] = Value(resolved);
-                    merged_scope["iwad"] = Value(resolved);
-                } else {
-                    item.assets_found = false;
-                    item.missing_assets.push_back(raw_iwad);
-                }
-            }
-        }
-
-        if (!pwad_key.empty()) {
-            const auto& pwad_val = merged_scope[pwad_key];
-            if (pwad_val.type == Value::Type::Array) {
-                Array resolved_arr;
-                for (const auto& elem : pwad_val.arr_val) {
-                    std::string raw_pwad = elem.to_string();
-                    std::string resolved = asset_resolver.resolve(raw_pwad, mod.module_dir);
-                    if (!resolved.empty()) {
-                        resolved_arr.push_back(Value(resolved));
-                        item.resolved_pwad_paths.push_back(resolved);
-                    } else {
-                        resolved_arr.push_back(Value(raw_pwad));
-                        item.assets_found = false;
-                        item.missing_assets.push_back(raw_pwad);
-                    }
-                }
-                merged_scope["PWADS"] = Value(resolved_arr);
-                merged_scope["pwads"] = Value(resolved_arr);
-            } else if (pwad_val.type == Value::Type::String && !pwad_val.str_val.empty()) {
-                std::string raw_pwad = pwad_val.str_val;
-                std::string resolved = asset_resolver.resolve(raw_pwad, mod.module_dir);
-                if (!resolved.empty()) {
+                    resolved_arr.push_back(Value(resolved));
                     item.resolved_pwad_paths.push_back(resolved);
-                    merged_scope["PWADS"] = Value(Array{Value(resolved)});
-                    merged_scope["pwads"] = Value(Array{Value(resolved)});
                 } else {
+                    std::string missing_label = !raw_pwad.empty() ? raw_pwad : req.sha1_list[0];
+                    resolved_arr.push_back(Value(missing_label));
                     item.assets_found = false;
-                    item.missing_assets.push_back(raw_pwad);
+                    item.missing_assets.push_back(missing_label);
                 }
             }
+            merged_scope["PWADS"] = Value(resolved_arr);
         }
 
-        // 3. Template evaluation passes across all variables (CMD, etc.)
-        for (int pass = 0; pass < 5; ++pass) {
+        // Inversion of Control: skip modules whose required WADs are not found when only_active is true
+        if (only_active && !item.assets_found) {
+            continue;
+        }
+
+        // Evaluate custom template variables (such as custom CMD if defined)
+        for (int pass = 0; pass < 3; ++pass) {
             bool any_changed = false;
             Scope current_scope = merged_scope;
             for (const auto& [k, v] : current_scope) {
@@ -738,22 +904,6 @@ std::vector<ResolvedMenuItem> ModuleRegistry::resolve_menu_items() {
                     std::string rendered = TemplateEngine::render(v.str_val, merged_scope);
                     if (rendered != v.str_val) {
                         merged_scope[k] = Value(rendered);
-                        any_changed = true;
-                    }
-                } else if (v.type == Value::Type::Array) {
-                    Array rendered_arr;
-                    bool arr_changed = false;
-                    for (const auto& elem : v.arr_val) {
-                        if (elem.type == Value::Type::String) {
-                            std::string rendered = TemplateEngine::render(elem.str_val, merged_scope);
-                            if (rendered != elem.str_val) arr_changed = true;
-                            rendered_arr.push_back(Value(rendered));
-                        } else {
-                            rendered_arr.push_back(elem);
-                        }
-                    }
-                    if (arr_changed) {
-                        merged_scope[k] = Value(rendered_arr);
                         any_changed = true;
                     }
                 }
@@ -809,7 +959,7 @@ std::vector<ResolvedMenuItem> ModuleRegistry::resolve_menu_items() {
 
         item.vars = merged_scope;
 
-        if (item.cmd.empty() && !item.compatible_engines.empty()) {
+        if (!item.compatible_engines.empty()) {
             item.cmd = item.get_command();
             item.vars["CMD"] = Value(item.cmd);
         }

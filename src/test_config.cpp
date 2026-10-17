@@ -3,6 +3,7 @@
 #include "template_engine.h"
 #include <algorithm>
 #include <cassert>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -46,14 +47,29 @@ void test_template_engine() {
 
 void test_module_registry() {
     std::cout << "--- Running ModuleRegistry & TOML tests ---" << std::endl;
+    namespace fs = std::filesystem;
+
+    fs::path temp_wads = "temp_mod_reg_wads";
+    fs::create_directories(temp_wads);
+    {
+        std::ofstream f(temp_wads / "DOOM2.WAD");
+        f << "IWAD";
+    }
+    {
+        std::ofstream f(temp_wads / "PLUTONIA.WAD");
+        f << "PWAD";
+    }
 
     // Create temporary test files
     {
         std::ofstream boom_toml("test_boom.toml");
         boom_toml << R"(
 [boom]
-BOOM_BIN = "/usr/bin/boom"
-CMD = "{{BOOM_BIN}} -iwad {{IWAD_PATH}} {% if COMPAT_LEVEL %}-complevel {{COMPAT_LEVEL}}{% endif %} {% if PWADS %}{% for wad in PWADS %}-file {{wad}} {% endfor %}{% endif %}-savedir {{MODULE_DIR}}/.saves"
+type = "engine"
+title = "Boom"
+binary = "sh"
+capabilities = ["vanilla", "boom"]
+cmd = "{{BIN}} -iwad {{IWAD}} {% if COMPAT_LEVEL %}-complevel {{COMPAT_LEVEL}}{% endif %}{% if PWADS %}{% for wad in PWADS %} -file {{wad}}{% endfor %}{% endif %} -savedir {{SAVEDIR}}"
 )";
     }
 
@@ -61,10 +77,10 @@ CMD = "{{BOOM_BIN}} -iwad {{IWAD_PATH}} {% if COMPAT_LEVEL %}-complevel {{COMPAT
         std::ofstream doom2_toml("test_doom2.toml");
         doom2_toml << R"(
 [doom2]
+type = "game"
 title = "Doom II: Hell on Earth"
-requires = ["boom"]
-IWAD_PATH = "{{MODULE_DIR}}/DOOM2.WAD"
-COMPAT_LEVEL = 2
+iwad = "DOOM2.WAD"
+compat_level = 2
 )";
     }
 
@@ -72,9 +88,10 @@ COMPAT_LEVEL = 2
         std::ofstream plutonia_toml("test_plutonia.toml");
         plutonia_toml << R"(
 [plutonia]
+type = "game"
 title = "Final Doom: Plutonia Experiment"
-requires = ["doom2"]
-PWADS = ["PLUTONIA.WAD"]
+base_game = "doom2"
+pwads = ["PLUTONIA.WAD"]
 )";
     }
 
@@ -83,17 +100,25 @@ PWADS = ["PLUTONIA.WAD"]
     assert(registry.load_file("test_doom2.toml"));
     assert(registry.load_file("test_plutonia.toml"));
 
+    // Before WAD discovery, no modules are active
+    assert(registry.resolve_menu_items().empty());
+
+    // Discover WADs -> both modules activate
+    registry.get_wad_catalog().scan_directory(temp_wads.string());
     std::vector<ResolvedMenuItem> menu_items = registry.resolve_menu_items();
 
     std::cout << "Resolved Menu Items Count: " << menu_items.size() << std::endl;
     for (const auto& item : menu_items) {
         std::cout << "Menu Item: '" << item.title << "' (" << item.module_name << ")" << std::endl;
         std::cout << "  CMD: " << item.cmd << std::endl;
+        assert(item.save_dir == ModuleRegistry::get_module_save_dir(item.module_name));
+        assert(item.cmd.find(item.save_dir) != std::string::npos);
     }
 
     assert(menu_items.size() == 2); // doom2 and plutonia
 
     // Clean up temporary test files
+    fs::remove_all(temp_wads);
     std::remove("test_boom.toml");
     std::remove("test_doom2.toml");
     std::remove("test_plutonia.toml");
@@ -103,6 +128,15 @@ PWADS = ["PLUTONIA.WAD"]
 
 void test_real_modules() {
     std::cout << "--- Testing modules/main.toml ---" << std::endl;
+    namespace fs = std::filesystem;
+
+    fs::path temp_wads = "temp_real_mod_wads";
+    fs::create_directories(temp_wads);
+    for (const char* w : {"DOOM.WAD", "DOOM2.WAD", "TNT.WAD", "PLUTONIA.WAD", "SIGIL.WAD"}) {
+        std::ofstream f(temp_wads / w);
+        f << "IWAD";
+    }
+
     ModuleRegistry registry;
     bool loaded = registry.load_file("modules/main.toml");
     if (!loaded) {
@@ -110,14 +144,20 @@ void test_real_modules() {
     }
     assert(loaded);
 
+    registry.get_wad_catalog().scan_directory(temp_wads.string());
+
     std::vector<ResolvedMenuItem> menu_items = registry.resolve_menu_items();
     std::cout << "Loaded real modules count: " << menu_items.size() << std::endl;
     for (const auto& item : menu_items) {
         std::cout << "Menu Item: '" << item.title << "' (" << item.module_name << ")" << std::endl;
         std::cout << "  CMD: " << item.cmd << std::endl;
         assert(!item.cmd.empty());
+        assert(item.save_dir == ModuleRegistry::get_module_save_dir(item.module_name));
+        assert(item.cmd.find(item.save_dir) != std::string::npos);
     }
     assert(menu_items.size() == 5);
+
+    fs::remove_all(temp_wads);
     std::cout << "Real modules test passed!" << std::endl << std::endl;
 }
 
@@ -164,11 +204,12 @@ void test_asset_resolver() {
     std::string found_alias = resolver.resolve("doom");
     assert(!found_alias.empty());
 
-    // 5. Test UserConfig TOML loading
+    // 5. Test UserConfig TOML loading & saving with module_dirs array
     {
         std::ofstream cfg("temp_config.toml");
         cfg << R"(
 [paths]
+modules = ["/usr/share/doomlauncher/modules", "~/.config/doomlauncher/modules"]
 wad_dirs = ["temp_test_assets"]
 
 [preferences]
@@ -180,14 +221,27 @@ doom2 = "temp_test_assets/DOOM2.WAD"
     }
 
     UserConfig user_cfg = AssetResolver::load_config("temp_config.toml");
+    assert(user_cfg.module_dirs.size() == 2);
+    assert(user_cfg.module_dirs[0] == "/usr/share/doomlauncher/modules");
+    assert(user_cfg.module_dirs[1] == "~/.config/doomlauncher/modules");
     assert(user_cfg.wad_dirs.size() == 1);
     assert(user_cfg.wad_dirs[0] == "temp_test_assets");
     assert(user_cfg.default_engine == "dsda-doom");
     assert(user_cfg.iwads.find("doom2") != user_cfg.iwads.end());
 
+    // Test saving config and reloading
+    user_cfg.iwads["plutonia"] = "temp_test_assets/PLUTONIA.WAD";
+    assert(AssetResolver::save_config(user_cfg, "temp_config_saved.toml"));
+    UserConfig reloaded_cfg = AssetResolver::load_config("temp_config_saved.toml");
+    assert(reloaded_cfg.module_dirs == user_cfg.module_dirs);
+    assert(reloaded_cfg.wad_dirs == user_cfg.wad_dirs);
+    assert(reloaded_cfg.default_engine == "dsda-doom");
+    assert(reloaded_cfg.iwads.at("plutonia") == "temp_test_assets/PLUTONIA.WAD");
+
     // Clean up
     fs::remove_all(temp_dir);
     fs::remove("temp_config.toml");
+    fs::remove("temp_config_saved.toml");
 
     std::cout << "AssetResolver tests passed!" << std::endl << std::endl;
 }
@@ -209,7 +263,11 @@ void test_module_registry_asset_resolution() {
         std::ofstream f("test_eng.toml");
         f << R"(
 [eng]
-CMD = "engine -iwad {{IWAD_PATH}} {% if PWADS %}-file {{PWADS[0]}}{% endif %}"
+type = "engine"
+title = "Test Engine"
+binary = "sh"
+capabilities = ["vanilla"]
+cmd = "{{BIN}} -iwad {{IWAD}} {% if PWADS %}-file {{PWADS[0]}}{% endif %}"
 )";
     }
 
@@ -218,9 +276,9 @@ CMD = "engine -iwad {{IWAD_PATH}} {% if PWADS %}-file {{PWADS[0]}}{% endif %}"
         std::ofstream f("test_game.toml");
         f << R"(
 [game1]
+type = "game"
 title = "Test Game Found"
-requires = ["eng"]
-IWAD_PATH = "doom2.wad"
+iwad = "doom2.wad"
 )";
     }
 
@@ -229,9 +287,9 @@ IWAD_PATH = "doom2.wad"
         std::ofstream f("test_missing.toml");
         f << R"(
 [game2]
+type = "game"
 title = "Test Game Missing"
-requires = ["eng"]
-IWAD_PATH = "missing_iwad.wad"
+iwad = "missing_iwad.wad"
 )";
     }
 
@@ -242,7 +300,13 @@ IWAD_PATH = "missing_iwad.wad"
     assert(registry.load_file("test_game.toml"));
     assert(registry.load_file("test_missing.toml"));
 
-    std::vector<ResolvedMenuItem> items = registry.resolve_menu_items();
+    // Default resolve_menu_items() returns ONLY active (satisfied) modules
+    std::vector<ResolvedMenuItem> active_items = registry.resolve_menu_items();
+    assert(active_items.size() == 1);
+    assert(active_items[0].module_name == "game1");
+
+    // resolve_menu_items(false) includes inactive modules for inspection
+    std::vector<ResolvedMenuItem> items = registry.resolve_menu_items(false);
     assert(items.size() == 2);
 
     for (const auto& item : items) {
@@ -312,7 +376,7 @@ type = "engine"
 title = "Sample Engine"
 binary = "sh"
 capabilities = ["vanilla", "boom", "sample_feature"]
-cmd = "{{BIN}} -iwad {{IWAD_PATH}}"
+cmd = "{{BIN}} -iwad {{IWAD}}"
 )";
     }
 
@@ -357,7 +421,7 @@ type = "engine"
 title = "Dynamic Boom"
 binary = "sh"
 capabilities = ["vanilla", "boom"]
-cmd = "{{BIN}} -iwad {{IWAD_PATH}} -complevel {{COMPAT_LEVEL}}"
+cmd = "{{BIN}} -iwad {{IWAD}} -complevel {{COMPAT_LEVEL}}"
 )";
     }
 
@@ -367,8 +431,8 @@ cmd = "{{BIN}} -iwad {{IWAD_PATH}} -complevel {{COMPAT_LEVEL}}"
         f << R"(
 [dyn_game]
 title = "Dynamic Decoupled Game"
-IWAD_PATH = "doom2.wad"
-COMPAT_LEVEL = 2
+iwad = "doom2.wad"
+compat_level = 2
 requires_capability = ["vanilla"]
 )";
     }
@@ -424,7 +488,7 @@ type = "engine"
 title = "Test Engine"
 binary = "sh"
 capabilities = ["vanilla", "boom"]
-cmd = "{{BIN}} -iwad {{IWAD_PATH}} {% if COMPAT_LEVEL %}-complevel {{COMPAT_LEVEL}}{% endif %}{% if PWADS %}{% for wad in PWADS %} -file {{wad}}{% endfor %}{% endif %}"
+cmd = "{{BIN}} -iwad {{IWAD}} {% if COMPAT_LEVEL %}-complevel {{COMPAT_LEVEL}}{% endif %}{% if PWADS %}{% for wad in PWADS %} -file {{wad}}{% endfor %}{% endif %}"
 )";
     }
 
@@ -507,7 +571,7 @@ type = "engine"
 title = "Engine One"
 binary = "sh"
 capabilities = ["vanilla"]
-cmd = "{{BIN}} -iwad {{IWAD_PATH}} --engine1"
+cmd = "{{BIN}} -iwad {{IWAD}} --engine1"
 )";
     }
 
@@ -519,7 +583,7 @@ type = "engine"
 title = "Engine Two"
 binary = "sh"
 capabilities = ["vanilla", "advanced"]
-cmd = "{{BIN}} -iwad {{IWAD_PATH}} --engine2"
+cmd = "{{BIN}} -iwad {{IWAD}} --engine2"
 )";
     }
 
@@ -551,7 +615,11 @@ requires_capability = ["quantum_feature"]
     assert(registry.load_file("test_p4_eng2.toml"));
     assert(registry.load_file("test_p4_games.toml"));
 
-    std::vector<ResolvedMenuItem> items = registry.resolve_menu_items();
+    // Default resolve_menu_items() omits missing_game
+    std::vector<ResolvedMenuItem> active_items = registry.resolve_menu_items();
+    assert(active_items.size() == 2);
+
+    std::vector<ResolvedMenuItem> items = registry.resolve_menu_items(false);
     assert(items.size() == 3);
 
     for (auto& item : items) {
@@ -587,6 +655,7 @@ requires_capability = ["quantum_feature"]
 
     // Test UserConfig default_engine preference
     UserConfig user_cfg;
+    user_cfg.wad_dirs = { temp_dir.string() };
     user_cfg.default_engine = "eng2";
     registry.set_user_config(user_cfg);
     std::vector<ResolvedMenuItem> pref_items = registry.resolve_menu_items();
@@ -876,7 +945,7 @@ type = "engine"
 title = "Boom Engine"
 binary = "sh"
 capabilities = ["vanilla", "boom", "complevel"]
-cmd = "{{BIN}} -iwad {{IWAD_PATH}} {% if COMPAT_LEVEL %}-complevel {{COMPAT_LEVEL}}{% endif %}{% if PWADS %}{% for wad in PWADS %} -file {{wad}}{% endfor %}{% endif %}{% if SAVEDIR %} -save {{SAVEDIR}}{% endif %}"
+cmd = "{{BIN}} -iwad {{IWAD}} {% if COMPAT_LEVEL %}-complevel {{COMPAT_LEVEL}}{% endif %}{% if PWADS %}{% for wad in PWADS %} -file {{wad}}{% endfor %}{% endif %} -save {{SAVEDIR}}"
 )";
     }
 
@@ -889,7 +958,7 @@ type = "engine"
 title = "GZDoom Engine"
 binary = "sh"
 capabilities = ["vanilla", "boom", "gzdoom"]
-cmd = "{{BIN}} -iwad {{IWAD_PATH}}{% if PWADS %}{% for wad in PWADS %} -file {{wad}}{% endfor %}{% endif %}{% if SAVEDIR %} -savedir {{SAVEDIR}}{% endif %}"
+cmd = "{{BIN}} -iwad {{IWAD}}{% if PWADS %}{% for wad in PWADS %} -file {{wad}}{% endfor %}{% endif %} -savedir {{SAVEDIR}}"
 )";
     }
 
@@ -902,11 +971,11 @@ type = "engine"
 title = "Chocolate Doom"
 binary = "sh"
 capabilities = ["vanilla"]
-cmd = "{{BIN}} -iwad {{IWAD_PATH}}{% if PWADS %}{% for wad in PWADS %} -merge {{wad}}{% endfor %}{% endif %}{% if SAVEDIR %} -savedir {{SAVEDIR}}{% endif %}"
+cmd = "{{BIN}} -iwad {{IWAD}}{% if PWADS %}{% for wad in PWADS %} -merge {{wad}}{% endfor %}{% endif %} -savedir {{SAVEDIR}}"
 )";
     }
 
-    // Game requiring 'vanilla' capability, compat_level 2, PWAD SIGIL.WAD, and savedir
+    // Game requiring 'vanilla' capability, compat_level 2, PWAD SIGIL.WAD
     {
         std::ofstream f("test_p6_game.toml");
         f << R"(
@@ -916,10 +985,11 @@ title = "Phase 6 Game"
 iwad = "DOOM2.WAD"
 pwads = ["SIGIL.WAD"]
 compat_level = 2
-savedir = "/tmp/doom_saves"
 requires_capability = ["vanilla"]
 )";
     }
+
+    setenv("DOOMLAUNCHER_SAVES", "/tmp/doom_saves", 1);
 
     ModuleRegistry registry;
     registry.get_asset_resolver().add_search_dir(temp_dir.string());
@@ -937,6 +1007,7 @@ requires_capability = ["vanilla"]
     assert(item.status == GameStatus::Ready);
     assert(item.assets_found);
     assert(item.compatible_engines.size() == 3);
+    assert(item.save_dir == "/tmp/doom_saves/p6_game");
 
     // 1. Select Boom engine: verify -complevel 2, -file, and -save are present
     assert(item.select_engine("p6-boom"));
@@ -946,7 +1017,7 @@ requires_capability = ["vanilla"]
     assert(boom_cmd.find("-complevel 2") != std::string::npos);
     assert(boom_cmd.find("-file") != std::string::npos);
     assert(boom_cmd.find("SIGIL.WAD") != std::string::npos);
-    assert(boom_cmd.find("-save /tmp/doom_saves") != std::string::npos);
+    assert(boom_cmd.find("-save /tmp/doom_saves/p6_game") != std::string::npos);
     assert(boom_cmd.find("-savedir") == std::string::npos);
     assert(boom_cmd.find("-merge") == std::string::npos);
 
@@ -958,7 +1029,7 @@ requires_capability = ["vanilla"]
     assert(gz_cmd.find("-complevel") == std::string::npos);
     assert(gz_cmd.find("-file") != std::string::npos);
     assert(gz_cmd.find("SIGIL.WAD") != std::string::npos);
-    assert(gz_cmd.find("-savedir /tmp/doom_saves") != std::string::npos);
+    assert(gz_cmd.find("-savedir /tmp/doom_saves/p6_game") != std::string::npos);
     assert(gz_cmd.find(" -save ") == std::string::npos);
     assert(gz_cmd.find("-merge") == std::string::npos);
 
@@ -971,7 +1042,7 @@ requires_capability = ["vanilla"]
     assert(choco_cmd.find("-merge") != std::string::npos);
     assert(choco_cmd.find("SIGIL.WAD") != std::string::npos);
     assert(choco_cmd.find("-file") == std::string::npos);
-    assert(choco_cmd.find("-savedir /tmp/doom_saves") != std::string::npos);
+    assert(choco_cmd.find("-savedir /tmp/doom_saves/p6_game") != std::string::npos);
 
     // 4. Switch back to Boom: verify -complevel 2 is restored
     assert(item.select_engine("p6-boom"));
@@ -984,6 +1055,8 @@ requires_capability = ["vanilla"]
     assert(!item.cmd.empty());
     assert(item.select_prev_engine());
     assert(item.selected_engine_index == initial_idx);
+
+    unsetenv("DOOMLAUNCHER_SAVES");
 
     // Clean up
     fs::remove_all(temp_dir);
@@ -1343,7 +1416,7 @@ type = "engine"
 title = "Boom Engine"
 binary = "sh"
 capabilities = ["vanilla", "boom"]
-cmd_template = "{{BIN}} -iwad {{IWAD}}"
+cmd = "{{BIN}} -iwad {{IWAD}}"
 )";
     }
 
@@ -1355,7 +1428,7 @@ type = "engine"
 title = "GZDoom"
 binary = "sh"
 capabilities = ["vanilla", "boom", "gzdoom"]
-cmd_template = "{{BIN}} -iwad {{IWAD}}"
+cmd = "{{BIN}} -iwad {{IWAD}}"
 )";
     }
 
@@ -1544,6 +1617,25 @@ void test_gui_rendering_verification() {
     menu.setStatusMessage("Settings saved to ~/.config/doomlauncher/state.toml");
     menu.render();
 
+    // 9. Render AddWadDialog overlay (F5)
+    send_test_key(menu, SDLK_F5);
+    assert(menu.getOverlayState() == OverlayState::AddWadDialog);
+    menu.render();
+    send_test_key(menu, SDLK_ESCAPE);
+    assert(menu.getOverlayState() == OverlayState::None);
+
+    // 10. Render CreateModuleForm overlay
+    WadFile dummyWad;
+    dummyWad.path = "/path/to/eviternity.wad";
+    dummyWad.filename = "eviternity.wad";
+    dummyWad.stem_lower = "eviternity";
+    dummyWad.sha1 = "1234567890abcdef1234567890abcdef12345678";
+    menu.openCreateModuleForm({ dummyWad });
+    assert(menu.getOverlayState() == OverlayState::CreateModuleForm);
+    menu.render();
+    send_test_key(menu, SDLK_ESCAPE);
+    assert(menu.getOverlayState() == OverlayState::None);
+
     // Clean up
     TTF_CloseFont(titleFont);
     TTF_CloseFont(monoFont);
@@ -1554,6 +1646,763 @@ void test_gui_rendering_verification() {
     SDL_Quit();
 
     std::cout << "Phase 6 Full GUI Rendering Verification Tests passed!" << std::endl << std::endl;
+}
+
+void test_phase1_multi_module_dirs_and_saves() {
+    std::cout << "--- Running Phase 1 Multi-Directory Modules & Centralized Saves Tests ---" << std::endl;
+    namespace fs = std::filesystem;
+
+    fs::path sys_mods = "temp_p1_sys_modules";
+    fs::path usr_mods = "temp_p1_usr_modules";
+    fs::path wad_dir = "temp_p1_wads";
+    fs::path cfg_file = "temp_p1_config.toml";
+
+    fs::create_directories(sys_mods / "engines");
+    fs::create_directories(sys_mods / "games");
+    fs::create_directories(usr_mods / "games");
+    fs::create_directories(wad_dir);
+
+    {
+        std::ofstream f(wad_dir / "DOOM2.WAD");
+        f << "IWAD";
+    }
+    {
+        std::ofstream f(wad_dir / "CUSTOM.WAD");
+        f << "PWAD";
+    }
+
+    // System engine
+    {
+        std::ofstream f(sys_mods / "engines" / "dsda.toml");
+        f << R"(
+[dsda-doom]
+type = "engine"
+title = "DSDA-Doom"
+binary = "sh"
+capabilities = ["vanilla", "boom"]
+cmd = "{{BIN}} -iwad {{IWAD}} {% if COMPAT_LEVEL %}-complevel {{COMPAT_LEVEL}}{% endif %}{% if PWADS %}{% for wad in PWADS %} -file {{wad}}{% endfor %}{% endif %} -savedir {{SAVEDIR}}"
+)";
+    }
+
+    // System base game
+    {
+        std::ofstream f(sys_mods / "games" / "doom2.toml");
+        f << R"TOML(
+[doom2]
+type = "game"
+title = "Doom II (System)"
+iwad = "DOOM2.WAD"
+compat_level = 2
+requires_capability = ["vanilla"]
+)TOML";
+    }
+
+    // User game + user override of doom2
+    {
+        std::ofstream f(usr_mods / "games" / "custom_mod.toml");
+        f << R"TOML(
+[custom_mod]
+type = "game"
+title = "User Custom Mod"
+base_game = "doom2"
+pwads = ["CUSTOM.WAD"]
+compat_level = 9
+requires_capability = ["boom"]
+)TOML";
+    }
+    {
+        std::ofstream f(usr_mods / "games" / "doom2_override.toml");
+        f << R"TOML(
+[doom2]
+type = "game"
+title = "Doom II (User Override)"
+iwad = "DOOM2.WAD"
+compat_level = 2
+requires_capability = ["vanilla"]
+)TOML";
+    }
+
+    // Save UserConfig with both module dirs
+    UserConfig cfg;
+    cfg.module_dirs = { sys_mods.string(), usr_mods.string() };
+    cfg.wad_dirs = { wad_dir.string() };
+    cfg.default_engine = "dsda-doom";
+    assert(AssetResolver::save_config(cfg, cfg_file.string()));
+
+    ModuleRegistry reg;
+    assert(reg.load_user_config(cfg_file.string()));
+    assert(reg.load_configured_modules());
+
+    auto items = reg.resolve_menu_items();
+    assert(items.size() == 2);
+
+    bool found_doom2 = false;
+    bool found_custom = false;
+    for (const auto& item : items) {
+        std::string expected_save = ModuleRegistry::get_module_save_dir(item.module_name);
+        assert(item.save_dir == expected_save);
+        assert(item.cmd.find("-savedir " + expected_save) != std::string::npos);
+
+        if (item.module_name == "doom2") {
+            found_doom2 = true;
+            // Verify user module overrode system module
+            assert(item.title == "Doom II (User Override)");
+        } else if (item.module_name == "custom_mod") {
+            found_custom = true;
+            assert(item.title == "User Custom Mod");
+            assert(item.cmd.find("-complevel 9") != std::string::npos);
+            assert(item.cmd.find("CUSTOM.WAD") != std::string::npos);
+        }
+    }
+    assert(found_doom2 && found_custom);
+
+    fs::remove_all(sys_mods);
+    fs::remove_all(usr_mods);
+    fs::remove_all(wad_dir);
+    fs::remove(cfg_file);
+
+    std::cout << "Phase 1 Multi-Directory Modules & Centralized Saves Tests passed!" << std::endl << std::endl;
+}
+
+void test_phase2_wad_catalog_and_sha1() {
+    std::cout << "--- Running Phase 2 WAD Catalog, SHA-1 & Cache Persistence Tests ---" << std::endl;
+    namespace fs = std::filesystem;
+
+    // 1. Verify RFC 3174 SHA-1 test vectors
+    const char* vec_empty = "";
+    assert(WadCatalog::compute_bytes_sha1(reinterpret_cast<const uint8_t*>(vec_empty), 0) ==
+           "da39a3ee5e6b4b0d3255bfef95601890afd80709");
+
+    const char* vec_abc = "abc";
+    assert(WadCatalog::compute_bytes_sha1(reinterpret_cast<const uint8_t*>(vec_abc), 3) ==
+           "a9993e364706816aba3e25717850c26c9cd0d89d");
+
+    const char* vec_long = "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";
+    assert(WadCatalog::compute_bytes_sha1(reinterpret_cast<const uint8_t*>(vec_long), std::strlen(vec_long)) ==
+           "84983e441c3bd26ebaae4aa1f95129e5e54670f1");
+
+    // 2. Create mock WADs and test header inspection + SHA-1 indexing
+    fs::path wad_dir = "temp_p2_wads";
+    fs::path state_file = "temp_p2_state.toml";
+    fs::create_directories(wad_dir / "mods");
+
+    {
+        std::ofstream f(wad_dir / "z_custom.wad", std::ios::binary);
+        f << "PWAD_CUSTOM_CONTENT_12345";
+    }
+    {
+        std::ofstream f(wad_dir / "DOOM.WAD", std::ios::binary);
+        f << "IWAD_DOOM1_CONTENT_ABCDEF";
+    }
+    {
+        std::ofstream f(wad_dir / "DOOM2.WAD", std::ios::binary);
+        f << "IWAD_DOOM2_CONTENT_987654";
+    }
+    {
+        std::ofstream f(wad_dir / "mods" / "a_mod.wad", std::ios::binary);
+        f << "PWAD_AMOD_CONTENT_XYZ";
+    }
+    {
+        std::ofstream f(wad_dir / "custom_iwad.wad", std::ios::binary);
+        f << "IWAD_OTHER_GAME_CONTENT";
+    }
+
+    bool is_iwad = false;
+    assert(WadCatalog::inspect_wad_header((wad_dir / "DOOM2.WAD").string(), is_iwad) && is_iwad);
+    assert(WadCatalog::inspect_wad_header((wad_dir / "z_custom.wad").string(), is_iwad) && !is_iwad);
+
+    UserConfig cfg;
+    cfg.wad_dirs = { wad_dir.string() };
+    cfg.iwads["my_doom2_alias"] = (wad_dir / "DOOM2.WAD").string();
+
+    WadCatalog catalog;
+    catalog.scan_from_config(cfg, false);
+    assert(catalog.get_all_wads().size() == 5);
+
+    std::string doom2_sha1 = WadCatalog::compute_file_sha1((wad_dir / "DOOM2.WAD").string());
+    assert(doom2_sha1.size() == 40);
+
+    // Lookup by SHA-1 (case-insensitive)
+    std::string upper_sha1 = doom2_sha1;
+    std::transform(upper_sha1.begin(), upper_sha1.end(), upper_sha1.begin(), ::toupper);
+    const WadFile* by_sha1 = catalog.find_by_sha1(upper_sha1);
+    assert(by_sha1 != nullptr);
+    assert(by_sha1->filename == "DOOM2.WAD");
+
+    // Lookup by alias
+    const WadFile* by_alias = catalog.find_by_alias("my_doom2_alias");
+    assert(by_alias != nullptr);
+    assert(by_alias->sha1 == doom2_sha1);
+
+    // Lookup by filename (case-insensitive) and subdirectory
+    const WadFile* by_fn = catalog.find_by_filename("A_MOD.WAD");
+    assert(by_fn != nullptr);
+    assert(by_fn->filename == "a_mod.wad");
+
+    // resolve_wad prioritizes SHA-1 match even if filename differs
+    const WadFile* resolved = catalog.resolve_wad("renamed_or_different.wad", { doom2_sha1 });
+    assert(resolved != nullptr);
+    assert(resolved->filename == "DOOM2.WAD");
+
+    // 3. Test prioritized dependency list: DOOM2.WAD first, DOOM.WAD second, other IWADs next, PWADs last
+    std::vector<WadFile> deps = catalog.get_prioritized_dependency_wads();
+    assert(deps.size() == 5);
+    assert(deps[0].filename == "DOOM2.WAD");
+    assert(deps[1].filename == "DOOM.WAD");
+    assert(deps[2].filename == "custom_iwad.wad");
+    assert(deps[3].filename == "a_mod.wad");
+    assert(deps[4].filename == "z_custom.wad");
+
+    // 4. Test SHA-1 cache persistence in state.toml alongside [engines]
+    ModuleRegistry reg;
+    reg.set_saved_engine("doom2", "dsda-doom");
+    reg.set_wad_catalog(catalog);
+    assert(reg.save_state(state_file.string()));
+
+    ModuleRegistry reg_loaded;
+    assert(reg_loaded.load_state(state_file.string()));
+    assert(reg_loaded.get_saved_engines().at("doom2") == "dsda-doom");
+    assert(reg_loaded.get_wad_catalog().get_cache().size() == 5);
+
+    // Verify cache hit on second scan
+    reg_loaded.get_wad_catalog().scan_from_config(cfg, false);
+    const WadFile* cached_doom2 = reg_loaded.get_wad_catalog().find_by_filename("DOOM2.WAD");
+    assert(cached_doom2 != nullptr);
+    assert(cached_doom2->sha1 == doom2_sha1);
+
+    // Modify DOOM2.WAD size -> verify cache invalidates and recomputes new SHA-1
+    {
+        std::ofstream f(wad_dir / "DOOM2.WAD", std::ios::binary | std::ios::trunc);
+        f << "IWAD_DOOM2_MODIFIED_CONTENT_LONGER_STRING_99999";
+    }
+    std::string new_doom2_sha1 = WadCatalog::compute_file_sha1((wad_dir / "DOOM2.WAD").string());
+    assert(new_doom2_sha1 != doom2_sha1);
+
+    reg_loaded.get_wad_catalog().clear();
+    reg_loaded.get_wad_catalog().scan_from_config(cfg, false);
+    const WadFile* updated_doom2 = reg_loaded.get_wad_catalog().find_by_filename("DOOM2.WAD");
+    assert(updated_doom2 != nullptr);
+    assert(updated_doom2->sha1 == new_doom2_sha1);
+
+    fs::remove_all(wad_dir);
+    fs::remove(state_file);
+
+    std::cout << "Phase 2 WAD Catalog, SHA-1 & Cache Persistence Tests passed!" << std::endl << std::endl;
+}
+
+void test_phase3_wad_driven_module_activation() {
+    std::cout << "--- Running Phase 3 WAD-Driven Module Activation & User Module Creation Tests ---" << std::endl;
+    namespace fs = std::filesystem;
+
+    fs::path wad_dir = "temp_p3_wads";
+    fs::path sys_mods = "temp_p3_sys_mods";
+    fs::path usr_mods = "temp_p3_usr_mods";
+    fs::remove_all(wad_dir);
+    fs::remove_all(sys_mods);
+    fs::remove_all(usr_mods);
+    fs::create_directories(wad_dir);
+    fs::create_directories(sys_mods / "engines");
+    fs::create_directories(sys_mods / "games");
+    fs::create_directories(usr_mods / "games");
+
+    // Create mock WADs with known content -> compute their SHA-1 hashes
+    fs::path doom2_path = wad_dir / "renamed_doom2_release.wad";
+    fs::path sigil_path = wad_dir / "my_sigil_download.wad";
+    fs::path eviternity_path = wad_dir / "Eviternity.wad";
+
+    {
+        std::ofstream f(doom2_path, std::ios::binary);
+        f << "IWAD_DOOM2_UNIQUE_BYTES_FOR_SHA1";
+    }
+    {
+        std::ofstream f(sigil_path, std::ios::binary);
+        f << "PWAD_SIGIL_UNIQUE_BYTES_FOR_SHA1";
+    }
+    {
+        std::ofstream f(eviternity_path, std::ios::binary);
+        f << "PWAD_EVITERNITY_UNIQUE_BYTES_FOR_SHA1";
+    }
+
+    std::string doom2_sha1 = WadCatalog::compute_file_sha1(doom2_path.string());
+    std::string sigil_sha1 = WadCatalog::compute_file_sha1(sigil_path.string());
+    std::string eviternity_sha1 = WadCatalog::compute_file_sha1(eviternity_path.string());
+
+    // System engine
+    {
+        std::ofstream f(sys_mods / "engines" / "dsda.toml");
+        f << R"TOML(
+[dsda-doom]
+type = "engine"
+title = "DSDA-Doom"
+binary = "sh"
+capabilities = ["vanilla", "boom", "mbf", "mbf21"]
+cmd = "{{BIN}} -iwad {{IWAD}} {% if COMPAT_LEVEL %}-complevel {{COMPAT_LEVEL}}{% endif %}{% if PWADS %}{% for wad in PWADS %} -file {{wad}}{% endfor %}{% endif %} -savedir {{SAVEDIR}}"
+)TOML";
+    }
+
+    // Pre-installed modules: doom2 (matched by SHA-1 even though filename on disk is renamed_doom2_release.wad!),
+    // sigil (depends on doom2 for this test, matched by SHA-1), and plutonia (missing WAD -> must NOT activate!)
+    {
+        std::ofstream f(sys_mods / "games" / "doom2.toml");
+        f << "[doom2]\n"
+          << "type = \"game\"\n"
+          << "title = \"Doom II: Hell on Earth\"\n"
+          << "iwad = \"DOOM2.WAD\"\n"
+          << "iwad_sha1 = [\"" << doom2_sha1 << "\"]\n"
+          << "compat_level = 2\n"
+          << "requires_capability = [\"vanilla\"]\n";
+    }
+    {
+        std::ofstream f(sys_mods / "games" / "sigil.toml");
+        f << "[sigil]\n"
+          << "type = \"game\"\n"
+          << "title = \"Sigil\"\n"
+          << "base_game = \"doom2\"\n"
+          << "pwads = [\"SIGIL.WAD\"]\n"
+          << "pwad_sha1 = [\"" << sigil_sha1 << "\"]\n"
+          << "compat_level = 3\n"
+          << "requires_capability = [\"vanilla\"]\n";
+    }
+    {
+        std::ofstream f(sys_mods / "games" / "plutonia.toml");
+        f << "[plutonia]\n"
+          << "type = \"game\"\n"
+          << "title = \"Final Doom: Plutonia\"\n"
+          << "base_game = \"doom2\"\n"
+          << "pwads = [\"PLUTONIA.WAD\"]\n"
+          << "pwad_sha1 = [\"0000000000000000000000000000000000000000\"]\n"
+          << "compat_level = 4\n"
+          << "requires_capability = [\"vanilla\"]\n";
+    }
+
+    UserConfig cfg;
+    cfg.module_dirs = { sys_mods.string(), usr_mods.string() };
+    cfg.default_engine = "dsda-doom";
+
+    ModuleRegistry reg;
+    reg.set_user_config(cfg);
+    // Clear system search paths so only our test WADs are used
+    reg.get_wad_catalog().clear();
+    reg.set_asset_resolver(AssetResolver());
+    assert(reg.load_configured_modules());
+
+    // 1. Before adding any WADs, 0 modules are active
+    assert(reg.resolve_menu_items().empty());
+
+    // 2. Add renamed_doom2_release.wad -> matched by SHA-1 -> activates 'doom2' only!
+    const WadFile* wf_doom2_ptr = reg.register_wad_file(doom2_path.string());
+    assert(wf_doom2_ptr != nullptr);
+    WadFile wf_doom2 = *wf_doom2_ptr;
+    assert(reg.find_modules_for_wad(wf_doom2) == std::vector<std::string>{"doom2"});
+
+    auto items_after_doom2 = reg.resolve_menu_items();
+    assert(items_after_doom2.size() == 1);
+    assert(items_after_doom2[0].module_name == "doom2");
+    assert(items_after_doom2[0].resolved_iwad_path == wf_doom2.path);
+
+    // 3. Add my_sigil_download.wad -> matched by SHA-1 -> activates 'sigil'!
+    const WadFile* wf_sigil_ptr = reg.register_wad_file(sigil_path.string());
+    assert(wf_sigil_ptr != nullptr);
+    WadFile wf_sigil = *wf_sigil_ptr;
+    assert(reg.find_modules_for_wad(wf_sigil) == std::vector<std::string>{"sigil"});
+
+    auto items_after_sigil = reg.resolve_menu_items();
+    assert(items_after_sigil.size() == 2); // doom2 + sigil (plutonia remains inactive!)
+
+    // 4. Add Eviternity.wad -> no matching module exists yet -> find_modules_for_wad returns empty
+    const WadFile* wf_evit_ptr = reg.register_wad_file(eviternity_path.string());
+    assert(wf_evit_ptr != nullptr);
+    WadFile wf_evit = *wf_evit_ptr;
+    assert(reg.find_modules_for_wad(wf_evit).empty());
+
+    // 5. Create user module for Eviternity.wad -> writes to usr_mods/games/eviternity.toml and activates it!
+    UserModuleSpec spec;
+    spec.title = "Eviternity";
+    spec.base_game = "doom2";
+    spec.pwads = { wf_evit.filename };
+    spec.pwad_sha1 = { eviternity_sha1 };
+    spec.compat_level = "11";
+    spec.requires_capability = { "mbf" };
+
+    std::string created_toml_path;
+    assert(reg.create_user_module(spec, created_toml_path, usr_mods.string()));
+    assert(fs::exists(created_toml_path));
+    assert(reg.find_modules_for_wad(wf_evit) == std::vector<std::string>{"eviternity"});
+
+    auto items_after_create = reg.resolve_menu_items();
+    assert(items_after_create.size() == 3); // doom2, sigil, eviternity
+
+    bool found_evit = false;
+    for (const auto& it : items_after_create) {
+        if (it.module_name == "eviternity") {
+            found_evit = true;
+            assert(it.title == "Eviternity");
+            assert(it.cmd.find("-complevel 11") != std::string::npos);
+            assert(it.cmd.find(wf_evit.path) != std::string::npos);
+            assert(it.cmd.find(wf_doom2.path) != std::string::npos);
+        }
+    }
+    assert(found_evit);
+
+    fs::remove_all(wad_dir);
+    fs::remove_all(sys_mods);
+    fs::remove_all(usr_mods);
+
+    std::cout << "Phase 3 WAD-Driven Module Activation & User Module Creation Tests passed!" << std::endl << std::endl;
+}
+
+void test_phase4_add_wad_and_create_module_dialogs() {
+    std::cout << "--- Running Phase 4 Add WAD & Create Module UI Dialog Tests ---" << std::endl;
+    namespace fs = std::filesystem;
+
+    fs::path test_root = "temp_p4_ui_test";
+    fs::remove_all(test_root);
+    fs::path wad_dir = test_root / "wads";
+    fs::path sys_mods = test_root / "sys_mods";
+    fs::path usr_mods = test_root / "usr_mods";
+    fs::path cfg_file = test_root / "config.toml";
+    fs::create_directories(wad_dir / "subdir");
+    fs::create_directories(sys_mods / "engines");
+    fs::create_directories(sys_mods / "games");
+    fs::create_directories(usr_mods / "games");
+
+    fs::path doom2_path = wad_dir / "DOOM2.WAD";
+    fs::path evit_path = wad_dir / "eviternity.wad";
+    {
+        std::ofstream f(doom2_path, std::ios::binary);
+        f << "IWAD_DOOM2_PHASE4_TEST_CONTENT";
+    }
+    {
+        std::ofstream f(evit_path, std::ios::binary);
+        f << "PWAD_EVITERNITY_PHASE4_TEST_CONTENT";
+    }
+
+    std::string doom2_sha1 = WadCatalog::compute_file_sha1(doom2_path.string());
+
+    {
+        std::ofstream f(sys_mods / "engines" / "dsda.toml");
+        f << R"TOML(
+[dsda-doom]
+type = "engine"
+title = "DSDA-Doom"
+binary = "sh"
+capabilities = ["vanilla", "boom", "mbf", "mbf21"]
+cmd = "{{BIN}} -iwad {{IWAD}} {% if COMPAT_LEVEL %}-complevel {{COMPAT_LEVEL}}{% endif %}{% if PWADS %}{% for wad in PWADS %} -file {{wad}}{% endfor %}{% endif %} -savedir {{SAVEDIR}}"
+)TOML";
+    }
+    {
+        std::ofstream f(sys_mods / "games" / "doom2.toml");
+        f << "[doom2]\n"
+          << "type = \"game\"\n"
+          << "title = \"Doom II: Hell on Earth\"\n"
+          << "iwad = \"DOOM2.WAD\"\n"
+          << "iwad_sha1 = [\"" << doom2_sha1 << "\"]\n"
+          << "compat_level = 2\n"
+          << "requires_capability = [\"vanilla\"]\n";
+    }
+
+    UserConfig cfg;
+    cfg.module_dirs = { sys_mods.string(), usr_mods.string() };
+    cfg.default_engine = "dsda-doom";
+
+    ModuleRegistry reg;
+    reg.set_user_config(cfg);
+    reg.get_wad_catalog().clear();
+    reg.set_asset_resolver(AssetResolver());
+    assert(reg.load_configured_modules());
+
+    Menu menu(nullptr, nullptr, nullptr, 1024, 768);
+    menu.setModuleRegistry(&reg);
+    menu.setConfigSavePath(cfg_file.string());
+    menu.setUserModulesDir(usr_mods.string());
+    menu.setMenuItems(reg.resolve_menu_items());
+
+    // Initially only "Quit" is in the menu (0 active games)
+    assert(menu.getMenuItems().size() == 1);
+    assert(menu.getMenuItems()[0].module_name == "quit");
+
+    auto sendKey = [&](SDL_Keycode sym) {
+        SDL_Event ev;
+        std::memset(&ev, 0, sizeof(ev));
+        ev.type = SDL_KEYDOWN;
+        ev.key.keysym.sym = sym;
+        menu.handleEvent(ev);
+    };
+
+    auto sendText = [&](const char* txt) {
+        SDL_Event ev;
+        std::memset(&ev, 0, sizeof(ev));
+        ev.type = SDL_TEXTINPUT;
+        std::strncpy(ev.text.text, txt, sizeof(ev.text.text) - 1);
+        menu.handleEvent(ev);
+    };
+
+    // 1. Open AddWadDialog via F5 and load wad_dir
+    sendKey(SDLK_F5);
+    assert(menu.getOverlayState() == OverlayState::AddWadDialog);
+    menu.loadBrowserDirectory(wad_dir.string());
+
+    const auto& entries = menu.getBrowserEntries();
+    // Should contain [..], subdir/, DOOM2.WAD, eviternity.wad
+    assert(entries.size() == 4);
+    assert(entries[0].is_parent);
+    assert(entries[1].is_dir && entries[1].name == "subdir/");
+    assert(!entries[2].is_dir && entries[2].name == "DOOM2.WAD");
+    assert(!entries[3].is_dir && entries[3].name == "eviternity.wad");
+
+    // 2. Navigate down to DOOM2.WAD (index 2) and press Enter -> activates existing module 'doom2'!
+    sendKey(SDLK_DOWN); // index 1 (subdir/)
+    sendKey(SDLK_DOWN); // index 2 (DOOM2.WAD)
+    assert(menu.getBrowserCursorIndex() == 2);
+    sendKey(SDLK_RETURN);
+
+    assert(menu.getOverlayState() == OverlayState::None);
+    assert(menu.getMenuItems().size() == 2); // doom2 + quit
+    assert(menu.getMenuItems()[menu.getSelectedItem()].module_name == "doom2");
+    assert(menu.getStatusMessage().find("Activated module: Doom II: Hell on Earth") != std::string::npos);
+    assert(fs::exists(cfg_file));
+
+    // 3. Press F5 again, select eviternity.wad (index 3), press Enter -> opens CreateModuleForm!
+    sendKey(SDLK_F5);
+    assert(menu.getOverlayState() == OverlayState::AddWadDialog);
+    menu.setBrowserCursorIndex(3); // eviternity.wad
+    sendKey(SDLK_RETURN);
+
+    assert(menu.getOverlayState() == OverlayState::CreateModuleForm);
+    assert(menu.getFormTitle() == "Eviternity");
+    assert(!menu.getFormBaseOptions().empty());
+    // DOOM2.WAD should be prioritized at index 0
+    assert(menu.getFormBaseOptions()[0].wad.filename == "DOOM2.WAD");
+    assert(menu.getFormBaseOptions()[0].base_game_module == "doom2");
+
+    // Edit title via Backspace + TextInput ("Eviternity" -> "Eviternity RC1")
+    sendText(" RC1");
+    assert(menu.getFormTitle() == "Eviternity RC1");
+
+    // Move to Complevel field (field 3) and cycle Right to '11 (MBF)' (index 5)
+    menu.setFormFieldIndex(3);
+    for (int i = 0; i < 5; ++i) {
+        sendKey(SDLK_RIGHT);
+    }
+    assert(menu.getFormComplevelIndex() == 5); // 11 (MBF)
+    assert(menu.getFormCapabilityIndex() == 3); // mbf
+
+    // Move to Save button (field 5) and press Enter -> creates usr_mods/games/eviternity_rc1.toml & activates!
+    menu.setFormFieldIndex(5);
+    sendKey(SDLK_RETURN);
+
+    assert(menu.getOverlayState() == OverlayState::None);
+    assert(fs::exists(usr_mods / "games" / "eviternity_rc1.toml"));
+    assert(menu.getMenuItems().size() == 3); // doom2, eviternity_rc1, quit
+    assert(menu.getMenuItems()[menu.getSelectedItem()].module_name == "eviternity_rc1");
+    assert(menu.getMenuItems()[menu.getSelectedItem()].title == "Eviternity RC1");
+    assert(menu.getStatusMessage().find("Created & activated module: Eviternity RC1") != std::string::npos);
+
+    fs::remove_all(test_root);
+
+    std::cout << "Phase 4 Add WAD & Create Module UI Dialog Tests passed!" << std::endl << std::endl;
+}
+
+void test_phase5_end_to_end_verification() {
+    std::cout << "--- Running Phase 5 End-to-End WAD & Module Lifecycle Verification Tests ---" << std::endl;
+    namespace fs = std::filesystem;
+
+    fs::path test_root = "temp_p5_e2e_test";
+    fs::remove_all(test_root);
+    fs::path wad_dir = test_root / "wads";
+    fs::path sys_mods = test_root / "sys_mods";
+    fs::path usr_mods = test_root / "usr_mods";
+    fs::path cfg_file = test_root / "config.toml";
+    fs::path state_file = test_root / "state.toml";
+
+    fs::create_directories(wad_dir);
+    fs::create_directories(sys_mods / "engines");
+    fs::create_directories(sys_mods / "games");
+    fs::create_directories(usr_mods / "games");
+
+    // Create DOOM2.WAD, DOOM.WAD, a custom standalone IWAD (FREEDOOM2.WAD), and a multi-PWAD combo (sunlust.wad + sunlust_music.wad)
+    fs::path doom2_path = wad_dir / "DOOM2.WAD";
+    fs::path doom1_path = wad_dir / "DOOM.WAD";
+    fs::path freedoom_path = wad_dir / "freedoom2.wad";
+    fs::path sunlust_path = wad_dir / "sunlust.wad";
+    fs::path sunlust_mus_path = wad_dir / "sunlust_music.wad";
+
+    {
+        std::ofstream f(doom2_path, std::ios::binary);
+        f << "IWAD_DOOM2_E2E_BYTES";
+    }
+    {
+        std::ofstream f(doom1_path, std::ios::binary);
+        f << "IWAD_DOOM1_E2E_BYTES";
+    }
+    {
+        std::ofstream f(freedoom_path, std::ios::binary);
+        f << "IWAD_FREEDOOM2_E2E_BYTES";
+    }
+    {
+        std::ofstream f(sunlust_path, std::ios::binary);
+        f << "PWAD_SUNLUST_MAIN_E2E_BYTES";
+    }
+    {
+        std::ofstream f(sunlust_mus_path, std::ios::binary);
+        f << "PWAD_SUNLUST_MUSIC_E2E_BYTES";
+    }
+
+    std::string doom2_sha1 = WadCatalog::compute_file_sha1(doom2_path.string());
+    std::string doom1_sha1 = WadCatalog::compute_file_sha1(doom1_path.string());
+
+    {
+        std::ofstream f(sys_mods / "engines" / "dsda.toml");
+        f << R"TOML(
+[dsda-doom]
+type = "engine"
+title = "DSDA-Doom"
+binary = "sh"
+capabilities = ["vanilla", "limit-removing", "boom", "mbf", "mbf21", "complevel"]
+cmd = "{{BIN}} -iwad {{IWAD}} {% if COMPAT_LEVEL %}-complevel {{COMPAT_LEVEL}}{% endif %}{% if PWADS %}{% for wad in PWADS %} -file {{wad}}{% endfor %}{% endif %} -save {{SAVEDIR}}"
+)TOML";
+    }
+    {
+        std::ofstream f(sys_mods / "games" / "doom2.toml");
+        f << "[doom2]\n"
+          << "type = \"game\"\n"
+          << "title = \"Doom II: Hell on Earth\"\n"
+          << "iwad = \"DOOM2.WAD\"\n"
+          << "iwad_sha1 = [\"" << doom2_sha1 << "\"]\n"
+          << "compat_level = 2\n"
+          << "requires_capability = [\"vanilla\"]\n";
+    }
+    {
+        std::ofstream f(sys_mods / "games" / "doom1.toml");
+        f << "[doom]\n"
+          << "type = \"game\"\n"
+          << "title = \"The Ultimate Doom\"\n"
+          << "iwad = \"DOOM.WAD\"\n"
+          << "iwad_sha1 = [\"" << doom1_sha1 << "\"]\n"
+          << "compat_level = 3\n"
+          << "requires_capability = [\"vanilla\"]\n";
+    }
+
+    // Write initial config.toml
+    UserConfig initial_cfg;
+    initial_cfg.module_dirs = { sys_mods.string(), usr_mods.string() };
+    initial_cfg.default_engine = "dsda-doom";
+    assert(AssetResolver::save_config(initial_cfg, cfg_file.string()));
+
+    // Session 1: Load config, add DOOM.WAD + DOOM2.WAD, then multi-select sunlust.wad + sunlust_music.wad, then add standalone freedoom2.wad
+    {
+        ModuleRegistry reg;
+        reg.load_state(state_file.string());
+        assert(reg.load_user_config(cfg_file.string()));
+        reg.get_wad_catalog().clear();
+        reg.set_asset_resolver(AssetResolver());
+        assert(reg.load_configured_modules());
+
+        Menu menu(nullptr, nullptr, nullptr, 1024, 768);
+        menu.setModuleRegistry(&reg);
+        menu.setConfigSavePath(cfg_file.string());
+        menu.setUserModulesDir(usr_mods.string());
+        menu.setMenuItems(reg.resolve_menu_items());
+
+        auto sendKey = [&](SDL_Keycode sym) {
+            SDL_Event ev;
+            std::memset(&ev, 0, sizeof(ev));
+            ev.type = SDL_KEYDOWN;
+            ev.key.keysym.sym = sym;
+            menu.handleEvent(ev);
+        };
+
+        // 1. Multi-select DOOM.WAD and DOOM2.WAD in AddWadDialog using Space + A
+        menu.openAddWadDialog(wad_dir.string());
+        const auto& entries = menu.getBrowserEntries();
+        // Entries: [..], DOOM.WAD, DOOM2.WAD, freedoom2.wad, sunlust.wad, sunlust_music.wad
+        assert(entries.size() == 6);
+        menu.setBrowserCursorIndex(1); // DOOM.WAD
+        sendKey(SDLK_SPACE);
+        menu.setBrowserCursorIndex(2); // DOOM2.WAD
+        sendKey(SDLK_SPACE);
+        sendKey(SDLK_a);
+
+        assert(menu.getOverlayState() == OverlayState::None);
+        assert(menu.getMenuItems().size() == 3); // doom, doom2, quit
+
+        // 2. Multi-select sunlust.wad (index 4) and sunlust_music.wad (index 5) using Space + A -> opens CreateModuleForm
+        menu.openAddWadDialog(wad_dir.string());
+        menu.setBrowserCursorIndex(4); // sunlust.wad
+        sendKey(SDLK_SPACE);
+        menu.setBrowserCursorIndex(5); // sunlust_music.wad
+        sendKey(SDLK_SPACE);
+        sendKey(SDLK_a);
+
+        assert(menu.getOverlayState() == OverlayState::CreateModuleForm);
+        assert(menu.getFormTitle() == "Sunlust");
+        // Verify prioritized base WADs: DOOM2.WAD is first, DOOM.WAD is second
+        assert(menu.getFormBaseOptions().size() >= 2);
+        assert(menu.getFormBaseOptions()[0].wad.filename == "DOOM2.WAD");
+        assert(menu.getFormBaseOptions()[1].wad.filename == "DOOM.WAD");
+
+        // Set Complevel to 9 (Boom) (index 4) -> auto-sets capability to boom (index 2)
+        menu.setFormFieldIndex(3);
+        for (int i = 0; i < 4; ++i) sendKey(SDLK_RIGHT);
+        assert(menu.getFormComplevelIndex() == 4);
+        assert(menu.getFormCapabilityIndex() == 2);
+
+        // Save module with F2 shortcut
+        sendKey(SDLK_F2);
+        assert(menu.getOverlayState() == OverlayState::None);
+        assert(fs::exists(usr_mods / "games" / "sunlust.toml"));
+
+        // 3. Add standalone IWAD freedoom2.wad (index 3) -> CreateModuleForm offers (Standalone IWAD) at index 0!
+        menu.openAddWadDialog(wad_dir.string());
+        menu.setBrowserCursorIndex(3); // freedoom2.wad
+        sendKey(SDLK_RETURN);
+
+        assert(menu.getOverlayState() == OverlayState::CreateModuleForm);
+        assert(!menu.getFormBaseOptions().empty());
+        assert(menu.getFormBaseOptions()[0].is_standalone);
+        sendKey(SDLK_F2);
+        assert(menu.getOverlayState() == OverlayState::None);
+        assert(fs::exists(usr_mods / "games" / "freedoom2.toml"));
+
+        // Save state (including WAD SHA-1 cache and engine selections)
+        std::string savedStatePath;
+        assert(reg.save_state(menu.getMenuItems(), savedStatePath, state_file.string()));
+    }
+
+    // Session 2: Simulate fresh restart of Doom Launcher loading config.toml, state.toml, and usr_mods/games/*.toml
+    {
+        ModuleRegistry reg2;
+        assert(reg2.load_state(state_file.string()));
+        assert(reg2.load_user_config(cfg_file.string()));
+        assert(reg2.load_configured_modules());
+
+        auto items = reg2.resolve_menu_items();
+        // Should have 4 active games: doom, doom2, sunlust, freedoom2
+        assert(items.size() == 4);
+
+        bool found_sunlust = false;
+        bool found_freedoom = false;
+        for (const auto& item : items) {
+            if (item.module_name == "sunlust") {
+                found_sunlust = true;
+                assert(item.resolved_pwad_paths.size() == 2);
+                assert(item.cmd.find("-complevel 9") != std::string::npos);
+                assert(item.cmd.find("sunlust.wad") != std::string::npos);
+                assert(item.cmd.find("sunlust_music.wad") != std::string::npos);
+                assert(item.cmd.find("-save " + ModuleRegistry::get_module_save_dir("sunlust")) != std::string::npos);
+            } else if (item.module_name == "freedoom2") {
+                found_freedoom = true;
+                assert(item.resolved_iwad_path.find("freedoom2.wad") != std::string::npos);
+                assert(item.resolved_pwad_paths.empty());
+            }
+        }
+        assert(found_sunlust);
+        assert(found_freedoom);
+    }
+
+    fs::remove_all(test_root);
+
+    std::cout << "Phase 5 End-to-End WAD & Module Lifecycle Verification Tests passed!" << std::endl << std::endl;
 }
 
 int main() {
@@ -1574,6 +2423,11 @@ int main() {
     test_menu_overlays();
     test_phase5_state_persistence();
     test_gui_rendering_verification();
+    test_phase1_multi_module_dirs_and_saves();
+    test_phase2_wad_catalog_and_sha1();
+    test_phase3_wad_driven_module_activation();
+    test_phase4_add_wad_and_create_module_dialogs();
+    test_phase5_end_to_end_verification();
     std::cout << "ALL TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;
 }

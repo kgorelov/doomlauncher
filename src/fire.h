@@ -16,16 +16,19 @@ private:
     SDL_Renderer* renderer;
     SDL_Texture* fireTexture;
     std::vector<Uint8> fireBuffer;
-    std::vector<SDL_Color> palette;
-    int width, height; // texture dimensions
-    int fwidth, fheight; // flame buffer dimensions
+    Uint32 palette[256];
+    SDL_Rect destRect;
+    int width, height;   // internal texture dimensions
+    int fwidth, fheight; // flame simulation buffer dimensions
+    Uint32 rngState;
+    bool bufferDirty;
 
     int hspread, vspread, residual;
     int ihspread, ivspread, iresidual;
     int variance, vartrend;
     bool bloom;
 
-
+    Uint32 nextRand();
     void initPalette();
     void flameActive();
     void flameAdvance();

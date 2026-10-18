@@ -4,4 +4,4 @@ title = "DSDA-Doom"
 binary = "dsda-doom"
 binaries = ["dsda-doom"]
 capabilities = ["vanilla", "limit-removing", "boom", "mbf", "mbf21", "complevel"]
-cmd = "{{BIN}} -iwad {{IWAD}} {% if COMPAT_LEVEL %}-complevel {{COMPAT_LEVEL}}{% endif %}{% if PWADS %}{% for wad in PWADS %} -file {{wad}}{% endfor %}{% endif %} -save {{SAVEDIR}}"
+cmd = "{{BIN}} -iwad {{IWAD}} {% if COMPAT_LEVEL %}-complevel {{COMPAT_LEVEL}}{% endif %}{% if PWADS %}{% for wad in PWADS %} -file {{wad}}{% endfor %}{% endif %} -save {{SAVEDIR}} -fullscreen"

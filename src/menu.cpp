@@ -1167,10 +1167,12 @@ void Menu::pruneTextCache() {
 }
 
 void Menu::clearTextCache() {
-    for (auto& [_, entry] : textCache) {
-        if (entry.texture) {
-            SDL_DestroyTexture(entry.texture);
-            entry.texture = nullptr;
+    if (SDL_WasInit(SDL_INIT_VIDEO) != 0) {
+        for (auto& [_, entry] : textCache) {
+            if (entry.texture) {
+                SDL_DestroyTexture(entry.texture);
+                entry.texture = nullptr;
+            }
         }
     }
     textCache.clear();

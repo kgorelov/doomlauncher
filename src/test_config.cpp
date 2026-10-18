@@ -2405,6 +2405,126 @@ cmd = "{{BIN}} -iwad {{IWAD}} {% if COMPAT_LEVEL %}-complevel {{COMPAT_LEVEL}}{%
     std::cout << "Phase 5 End-to-End WAD & Module Lifecycle Verification Tests passed!" << std::endl << std::endl;
 }
 
+void test_menu_substring_filter() {
+    std::cout << "--- Running Menu Substring Filter ('/' and F7) Tests ---" << std::endl;
+    Menu menu(nullptr, nullptr, nullptr, 800, 600);
+
+    doomlauncher::EngineInfo eng1;
+    eng1.name = "dsda";
+    eng1.title = "DSDA-Doom";
+    eng1.cmd_template = "dsda-doom -iwad DOOM2.WAD";
+
+    doomlauncher::EngineInfo eng2;
+    eng2.name = "gzdoom";
+    eng2.title = "GZDoom";
+    eng2.cmd_template = "gzdoom -iwad DOOM2.WAD";
+
+    auto makeItem = [&](const std::string& modName, const std::string& title) {
+        doomlauncher::ResolvedMenuItem it;
+        it.module_name = modName;
+        it.title = title;
+        it.status = doomlauncher::GameStatus::Ready;
+        it.assets_found = true;
+        it.compatible_engines = { eng1, eng2 };
+        it.selected_engine_index = 0;
+        it.cmd = it.get_command();
+        return it;
+    };
+
+    std::vector<doomlauncher::ResolvedMenuItem> items = {
+        makeItem("doom", "The Ultimate Doom"),
+        makeItem("doom2", "Doom II: Hell on Earth"),
+        makeItem("tnt", "Final Doom: TNT - Evilution"),
+        makeItem("plutonia", "Final Doom: The Plutonia Experiment")
+    };
+    menu.setMenuItems(items);
+
+    auto sendKey = [&](SDL_Keycode sym) {
+        SDL_Event ev;
+        std::memset(&ev, 0, sizeof(ev));
+        ev.type = SDL_KEYDOWN;
+        ev.key.keysym.sym = sym;
+        menu.handleEvent(ev);
+    };
+
+    auto sendText = [&](const char* txt) {
+        SDL_Event ev;
+        std::memset(&ev, 0, sizeof(ev));
+        ev.type = SDL_TEXTINPUT;
+        std::strncpy(ev.text.text, txt, sizeof(ev.text.text) - 1);
+        menu.handleEvent(ev);
+    };
+
+    // Initially 5 items (4 games + Quit)
+    assert(!menu.isFilterActive());
+    assert(menu.getFilterQuery().empty());
+    assert(menu.getMenuItems().size() == 5);
+
+    // 1. Press '/' -> activates filter mode, ignores immediate '/' text input, then type 'hell'
+    sendKey(SDLK_SLASH);
+    assert(menu.isFilterActive());
+    sendText("/"); // Simulate SDL2 emitting SDL_TEXTINPUT("/") for the slash key press
+    assert(menu.getFilterQuery().empty());
+
+    sendText("hell");
+    assert(menu.getFilterQuery() == "hell");
+    assert(menu.getMenuItems().size() == 1);
+    assert(menu.getMenuItems()[0].title == "Doom II: Hell on Earth");
+    assert(menu.getSelectedItem() == 0);
+
+    // Change engine while filtered -> verify it syncs back when filter is cleared
+    sendKey(SDLK_RIGHT);
+    assert(menu.getMenuItems()[0].get_selected_engine()->name == "gzdoom");
+
+    // 2. Press Escape -> clears filter instead of opening QuitConfirm, keeps Doom II selected & engine preserved
+    sendKey(SDLK_ESCAPE);
+    assert(!menu.isFilterActive());
+    assert(menu.getFilterQuery().empty());
+    assert(menu.getOverlayState() == OverlayState::None);
+    assert(menu.getMenuItems().size() == 5);
+    assert(menu.getMenuItems()[menu.getSelectedItem()].module_name == "doom2");
+    assert(menu.getMenuItems()[menu.getSelectedItem()].get_selected_engine()->name == "gzdoom");
+
+    // 3. Press F7 -> activates filter mode, type 'final', then Backspace
+    sendKey(SDLK_F7);
+    assert(menu.isFilterActive());
+    sendText("final");
+    assert(menu.getFilterQuery() == "final");
+    assert(menu.getMenuItems().size() == 2);
+    assert(menu.getMenuItems()[0].module_name == "tnt");
+    assert(menu.getMenuItems()[1].module_name == "plutonia");
+
+    // Backspace removes characters one by one
+    for (int i = 0; i < 5; ++i) {
+        sendKey(SDLK_BACKSPACE);
+    }
+    assert(menu.getFilterQuery().empty());
+    assert(menu.getMenuItems().size() == 5);
+    assert(menu.isFilterActive());
+
+    // Pressing Backspace when query is already empty exits filter mode
+    sendKey(SDLK_BACKSPACE);
+    assert(!menu.isFilterActive());
+
+    // 4. Filter with 0 matches handles navigation and rendering safely
+    sendKey(SDLK_F7);
+    sendText("nonexistent");
+    assert(menu.getMenuItems().empty());
+    sendKey(SDLK_UP);
+    sendKey(SDLK_DOWN);
+    sendKey(SDLK_PAGEUP);
+    sendKey(SDLK_PAGEDOWN);
+    menu.render();
+
+    // Pressing F7 while active clears and exits filter mode
+    sendKey(SDLK_F7);
+    assert(!menu.isFilterActive());
+    assert(menu.getFilterQuery().empty());
+    assert(menu.getMenuItems().size() == 5);
+
+    std::cout << "Menu Substring Filter ('/' and F7) Tests passed!" << std::endl << std::endl;
+}
+
 int main() {
     test_template_engine();
     test_module_registry();
@@ -2428,6 +2548,7 @@ int main() {
     test_phase3_wad_driven_module_activation();
     test_phase4_add_wad_and_create_module_dialogs();
     test_phase5_end_to_end_verification();
+    test_menu_substring_filter();
     std::cout << "ALL TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;
 }

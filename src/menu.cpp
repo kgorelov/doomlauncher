@@ -101,8 +101,8 @@ void Menu::toggleOsdFont() {
 }
 
 void Menu::setMenuItems(const std::vector<doomlauncher::ResolvedMenuItem>& items) {
-    menuItems = items;
-    for (auto& item : menuItems) {
+    allMenuItems = items;
+    for (auto& item : allMenuItems) {
         if (item.cmd.empty() && !item.compatible_engines.empty()) {
             item.cmd = item.get_command();
         }
@@ -111,9 +111,81 @@ void Menu::setMenuItems(const std::vector<doomlauncher::ResolvedMenuItem>& items
     doomlauncher::ResolvedMenuItem quit_item;
     quit_item.title = "Quit";
     quit_item.module_name = "quit";
-    menuItems.push_back(quit_item);
+    allMenuItems.push_back(quit_item);
+
+    filterActive = false;
+    filterQuery.clear();
+    ignoreNextSlashTextInput = false;
+    menuItems = allMenuItems;
+    selectedItem = 0;
+}
+
+void Menu::startFilter(bool fromSlashKey) {
+    filterActive = true;
+    ignoreNextSlashTextInput = fromSlashKey;
+    statusMessage.clear();
+    if (SDL_WasInit(SDL_INIT_VIDEO) != 0) {
+        SDL_StartTextInput();
+    }
+}
+
+void Menu::clearFilter() {
+    filterActive = false;
+    ignoreNextSlashTextInput = false;
+    if (SDL_WasInit(SDL_INIT_VIDEO) != 0) {
+        SDL_StopTextInput();
+    }
+    if (!filterQuery.empty()) {
+        filterQuery.clear();
+        applyFilter();
+    }
+}
+
+void Menu::syncMenuItemsToAll() {
+    for (const auto& item : menuItems) {
+        if (item.module_name == "quit") continue;
+        for (auto& orig : allMenuItems) {
+            if (orig.module_name == item.module_name) {
+                orig.selected_engine_index = item.selected_engine_index;
+                orig.cmd = item.cmd;
+                break;
+            }
+        }
+    }
+}
+
+void Menu::applyFilter() {
+    syncMenuItemsToAll();
+
+    std::string prevSelectedModule;
+    if (selectedItem >= 0 && selectedItem < static_cast<int>(menuItems.size())) {
+        prevSelectedModule = menuItems[selectedItem].module_name;
+    }
+
+    if (filterQuery.empty()) {
+        menuItems = allMenuItems;
+    } else {
+        std::string qLower = to_lower_str(filterQuery);
+        menuItems.clear();
+        for (const auto& item : allMenuItems) {
+            if (item.module_name == "quit") {
+                continue;
+            }
+            if (to_lower_str(item.title).find(qLower) != std::string::npos) {
+                menuItems.push_back(item);
+            }
+        }
+    }
 
     selectedItem = 0;
+    if (!prevSelectedModule.empty() && prevSelectedModule != "quit") {
+        for (size_t i = 0; i < menuItems.size(); ++i) {
+            if (menuItems[i].module_name == prevSelectedModule) {
+                selectedItem = static_cast<int>(i);
+                break;
+            }
+        }
+    }
 }
 
 void Menu::refreshMenuFromRegistry(const std::string& selectModuleName) {
@@ -418,7 +490,7 @@ bool Menu::submitCreateModuleForm() {
 }
 
 void Menu::handleEvent(const SDL_Event& event) {
-    if (menuItems.empty()) return;
+    if (allMenuItems.empty()) return;
 
     int totalItems = static_cast<int>(menuItems.size());
     int totalPages = (totalItems + ITEMS_PER_PAGE - 1) / ITEMS_PER_PAGE;
@@ -462,6 +534,7 @@ void Menu::handleEvent(const SDL_Event& event) {
                             if (count > 0 && modalCursorIndex >= 0 && modalCursorIndex < count) {
                                 item.selected_engine_index = static_cast<size_t>(modalCursorIndex);
                                 item.cmd = item.get_command();
+                                syncMenuItemsToAll();
                                 const auto* eng = item.get_selected_engine();
                                 statusMessage = "Engine set to " + (eng ? eng->title : "selected");
                             }
@@ -611,41 +684,74 @@ void Menu::handleEvent(const SDL_Event& event) {
         return;
     }
 
+    if (filterActive && event.type == SDL_TEXTINPUT) {
+        if (ignoreNextSlashTextInput) {
+            ignoreNextSlashTextInput = false;
+            if (std::strcmp(event.text.text, "/") == 0) {
+                return;
+            }
+        }
+        bool changed = false;
+        for (const char* p = event.text.text; *p != '\0'; ++p) {
+            if (static_cast<unsigned char>(*p) >= 32 && filterQuery.size() < 48) {
+                filterQuery.push_back(*p);
+                changed = true;
+            }
+        }
+        if (changed) {
+            applyFilter();
+            statusMessage.clear();
+        }
+        return;
+    }
+
     if (event.type == SDL_KEYDOWN) {
+        if (event.key.keysym.sym != SDLK_SLASH) {
+            ignoreNextSlashTextInput = false;
+        }
         switch (event.key.keysym.sym) {
             case SDLK_UP:
-                selectedItem = (selectedItem - 1 + totalItems) % totalItems;
-                statusMessage.clear();
+                if (totalItems > 0) {
+                    selectedItem = (selectedItem - 1 + totalItems) % totalItems;
+                    statusMessage.clear();
+                }
                 break;
             case SDLK_DOWN:
-                selectedItem = (selectedItem + 1) % totalItems;
-                statusMessage.clear();
+                if (totalItems > 0) {
+                    selectedItem = (selectedItem + 1) % totalItems;
+                    statusMessage.clear();
+                }
                 break;
             case SDLK_PAGEUP:
-                if (currentPage > 0) {
-                    selectedItem = std::max(0, selectedItem - ITEMS_PER_PAGE);
-                } else {
-                    int targetPage = totalPages - 1;
-                    int slot = selectedItem % ITEMS_PER_PAGE;
-                    int targetItem = targetPage * ITEMS_PER_PAGE + slot;
-                    if (targetItem >= totalItems) targetItem = totalItems - 1;
-                    selectedItem = targetItem;
+                if (totalItems > 0) {
+                    if (currentPage > 0) {
+                        selectedItem = std::max(0, selectedItem - ITEMS_PER_PAGE);
+                    } else {
+                        int targetPage = totalPages - 1;
+                        int slot = selectedItem % ITEMS_PER_PAGE;
+                        int targetItem = targetPage * ITEMS_PER_PAGE + slot;
+                        if (targetItem >= totalItems) targetItem = totalItems - 1;
+                        selectedItem = targetItem;
+                    }
+                    statusMessage.clear();
                 }
-                statusMessage.clear();
                 break;
             case SDLK_PAGEDOWN:
-                if (currentPage < totalPages - 1) {
-                    int targetItem = selectedItem + ITEMS_PER_PAGE;
-                    if (targetItem >= totalItems) targetItem = totalItems - 1;
-                    selectedItem = targetItem;
-                } else {
-                    selectedItem = selectedItem % ITEMS_PER_PAGE;
+                if (totalItems > 0) {
+                    if (currentPage < totalPages - 1) {
+                        int targetItem = selectedItem + ITEMS_PER_PAGE;
+                        if (targetItem >= totalItems) targetItem = totalItems - 1;
+                        selectedItem = targetItem;
+                    } else {
+                        selectedItem = selectedItem % ITEMS_PER_PAGE;
+                    }
+                    statusMessage.clear();
                 }
-                statusMessage.clear();
                 break;
             case SDLK_LEFT:
                 if (selectedItem >= 0 && selectedItem < totalItems) {
                     if (menuItems[selectedItem].select_prev_engine()) {
+                        syncMenuItemsToAll();
                         statusMessage.clear();
                     }
                 }
@@ -653,15 +759,34 @@ void Menu::handleEvent(const SDL_Event& event) {
             case SDLK_RIGHT:
                 if (selectedItem >= 0 && selectedItem < totalItems) {
                     if (menuItems[selectedItem].select_next_engine()) {
+                        syncMenuItemsToAll();
                         statusMessage.clear();
                     }
                 }
                 break;
             case SDLK_RETURN:
-                if (menuItems[selectedItem].module_name == "quit") {
-                    quitSelected = true;
-                } else {
-                    launchSelected();
+                if (selectedItem >= 0 && selectedItem < totalItems) {
+                    if (menuItems[selectedItem].module_name == "quit") {
+                        quitSelected = true;
+                    } else {
+                        launchSelected();
+                    }
+                }
+                break;
+            case SDLK_BACKSPACE:
+                if (filterActive) {
+                    if (!filterQuery.empty()) {
+                        filterQuery.pop_back();
+                        applyFilter();
+                        statusMessage.clear();
+                    } else {
+                        clearFilter();
+                    }
+                }
+                break;
+            case SDLK_SLASH:
+                if (!filterActive) {
+                    startFilter(true);
                 }
                 break;
             case SDLK_F1:
@@ -687,29 +812,45 @@ void Menu::handleEvent(const SDL_Event& event) {
             case SDLK_F5:
                 openAddWadDialog();
                 break;
+            case SDLK_F7:
+                if (filterActive) {
+                    clearFilter();
+                } else {
+                    startFilter(false);
+                }
+                break;
             case SDLK_F9:
                 if (altSmallFont) {
                     toggleOsdFont();
                 }
                 break;
             case SDLK_F10:
-            case SDLK_ESCAPE:
                 overlayState = OverlayState::QuitConfirm;
                 statusMessage.clear();
+                break;
+            case SDLK_ESCAPE:
+                if (filterActive || !filterQuery.empty()) {
+                    clearFilter();
+                    statusMessage.clear();
+                } else {
+                    overlayState = OverlayState::QuitConfirm;
+                    statusMessage.clear();
+                }
                 break;
         }
     }
 }
 
 void Menu::saveSettings() {
+    syncMenuItemsToAll();
     std::string savedPath;
     bool success = false;
     if (saveCallback) {
-        success = saveCallback(menuItems, savedPath);
+        success = saveCallback(allMenuItems, savedPath);
     } else if (moduleRegistry) {
-        success = moduleRegistry->save_state(menuItems, savedPath);
+        success = moduleRegistry->save_state(allMenuItems, savedPath);
     } else {
-        success = doomlauncher::ModuleRegistry::save_state_from_items(menuItems, savedPath);
+        success = doomlauncher::ModuleRegistry::save_state_from_items(allMenuItems, savedPath);
     }
 
     if (success) {
@@ -767,7 +908,7 @@ void Menu::update() {
 }
 
 void Menu::render() {
-    if (menuItems.empty()) return;
+    if (allMenuItems.empty()) return;
 
     ++cacheTick;
 
@@ -803,36 +944,48 @@ void Menu::render() {
     int startY = (osdStartY - pageIndicatorHeight - 20 - effectiveMenuHeight) / 2 + 10;
     if (startY < 15) startY = 15;
 
-    for (int i = pageStartIndex; i < pageEndIndex; ++i) {
-        const auto& item = menuItems[i];
-        bool isSelected = (i == selectedItem);
-        bool isPlayable = (item.status == doomlauncher::GameStatus::Ready && item.assets_found);
-        SDL_Color color;
-        if (!isPlayable) {
-            color = isSelected ? darkRed : gray;
-        } else {
-            color = isSelected ? red : white;
-        }
+    if (totalItems == 0) {
+        renderText(font, "No matching games", 0, startY, gray, true);
+    } else {
+        for (int i = pageStartIndex; i < pageEndIndex; ++i) {
+            const auto& item = menuItems[i];
+            bool isSelected = (i == selectedItem);
+            bool isPlayable = (item.status == doomlauncher::GameStatus::Ready && item.assets_found);
+            SDL_Color color;
+            if (!isPlayable) {
+                color = isSelected ? darkRed : gray;
+            } else {
+                color = isSelected ? red : white;
+            }
 
-        int slotIndex = i - pageStartIndex;
-        int y = startY + slotIndex * itemSpacing;
-        renderText(font, item.title, 0, y, color, true);
+            int slotIndex = i - pageStartIndex;
+            int y = startY + slotIndex * itemSpacing;
+            renderText(font, item.title, 0, y, color, true);
+        }
     }
 
-    // Render page indicator under menu
+    // Render page / filter indicator under menu
     if (activeSmallFont) {
-        std::string pageIndicator = "[ Page " + std::to_string(currentPage + 1) + " of " + std::to_string(totalPages) + " ]";
+        std::string pageIndicator;
+        SDL_Color indicatorColor = gray;
+        if (filterActive || !filterQuery.empty()) {
+            pageIndicator = "[ Filter: " + filterQuery + (filterActive ? "_" : "") +
+                            " (" + std::to_string(totalItems) + (totalItems == 1 ? " match" : " matches") +
+                            ", Page " + std::to_string(currentPage + 1) + "/" + std::to_string(totalPages) +
+                            ") | Esc: Clear ]";
+            indicatorColor = yellow;
+        } else {
+            pageIndicator = "[ Page " + std::to_string(currentPage + 1) + " of " + std::to_string(totalPages) + " ]";
+        }
         int pageIndicatorY = startY + (ITEMS_PER_PAGE - 1) * itemSpacing + fontHeight + 8;
         if (pageIndicatorY + smallFontHeight >= osdStartY) {
             pageIndicatorY = osdStartY - smallFontHeight - 4;
         }
-        renderText(activeSmallFont, pageIndicator, 0, pageIndicatorY, gray, true);
+        renderText(activeSmallFont, pageIndicator, 0, pageIndicatorY, indicatorColor, true);
     }
 
     // Render OSD / HUD Block at bottom left
-    if (activeSmallFont && selectedItem >= 0 && selectedItem < totalItems) {
-        const auto& item = menuItems[selectedItem];
-
+    if (activeSmallFont) {
         std::string fontHint = altSmallFont ? "F9: Font | " : "";
         std::string line1;
         SDL_Color line1Color = yellow;
@@ -843,48 +996,58 @@ void Menu::render() {
         std::string line3;
         SDL_Color line3Color = gray;
 
-        if (item.module_name == "quit") {
-            line1 = "ACTION: Exit Doom Launcher";
-            line1Color = yellow;
-            line2 = "Press Enter or F10 to exit (or F5 to add WAD files)";
-            line2Color = gray;
-            line3 = "F1: Help | F5: Add WAD | " + fontHint + "Enter: Exit | F10: Fast Quit";
-        } else if (item.status == doomlauncher::GameStatus::MissingAssets || (!item.assets_found && !item.missing_assets.empty())) {
-            line1 = "STATUS: Cannot launch - missing asset";
-            if (!item.missing_assets.empty()) {
-                line1 += " (" + item.missing_assets[0] + ")";
-            } else if (!item.status_details.empty()) {
-                line1 += " (" + item.status_details + ")";
-            }
+        if (totalItems == 0) {
+            line1 = "FILTER: No games matching \"" + filterQuery + "\"";
             line1Color = red;
-            line2 = "CMD: [Disabled - missing assets]";
+            line2 = "Press Backspace to edit or Esc to clear filter";
             line2Color = gray;
-            line3 = "F1: Help | F2: Save | F3: Info | F4: Engine | F5: Add WAD | " + fontHint + "F10: Quit";
-        } else if (item.status == doomlauncher::GameStatus::NoCompatibleEngine) {
-            line1 = "STATUS: Cannot launch - no compatible engine installed";
-            if (!item.status_details.empty()) {
-                line1 += " (" + item.status_details + ")";
-            }
-            line1Color = red;
-            line2 = "CMD: [Disabled - no compatible engine]";
-            line2Color = gray;
-            line3 = "F1: Help | F2: Save | F3: Info | F4: Engine | F5: Add WAD | " + fontHint + "F10: Quit";
-        } else {
-            const auto* eng = item.get_selected_engine();
-            std::string engTitle = eng ? eng->title : "Unknown";
-            line1 = "ENGINE: " + engTitle;
-            if (item.compatible_engines.size() > 1) {
-                line1 += " [" + std::to_string(item.compatible_engines.size()) + " compatible | F4: Change]";
-            } else if (item.compatible_engines.size() == 1) {
-                line1 += " [1 compatible]";
-            }
-            line1Color = yellow;
+            line3 = "F1: Help | F7: Clear Filter | " + fontHint + "Esc: Reset | F10: Quit";
+        } else if (selectedItem >= 0 && selectedItem < totalItems) {
+            const auto& item = menuItems[selectedItem];
 
-            const std::string& cmd = !item.cmd.empty() ? item.cmd : item.get_command();
-            line2 = "CMD: " + cmd;
-            line2Color = white;
+            if (item.module_name == "quit") {
+                line1 = "ACTION: Exit Doom Launcher";
+                line1Color = yellow;
+                line2 = "Press Enter or F10 to exit (or F5 to add WAD files)";
+                line2Color = gray;
+                line3 = "F1: Help | F5: Add WAD | F7: Filter | " + fontHint + "Enter: Exit | F10: Fast Quit";
+            } else if (item.status == doomlauncher::GameStatus::MissingAssets || (!item.assets_found && !item.missing_assets.empty())) {
+                line1 = "STATUS: Cannot launch - missing asset";
+                if (!item.missing_assets.empty()) {
+                    line1 += " (" + item.missing_assets[0] + ")";
+                } else if (!item.status_details.empty()) {
+                    line1 += " (" + item.status_details + ")";
+                }
+                line1Color = red;
+                line2 = "CMD: [Disabled - missing assets]";
+                line2Color = gray;
+                line3 = "F1: Help | F2: Save | F3: Info | F4: Engine | F5: Add WAD | F7: Filter | " + fontHint + "F10: Quit";
+            } else if (item.status == doomlauncher::GameStatus::NoCompatibleEngine) {
+                line1 = "STATUS: Cannot launch - no compatible engine installed";
+                if (!item.status_details.empty()) {
+                    line1 += " (" + item.status_details + ")";
+                }
+                line1Color = red;
+                line2 = "CMD: [Disabled - no compatible engine]";
+                line2Color = gray;
+                line3 = "F1: Help | F2: Save | F3: Info | F4: Engine | F5: Add WAD | F7: Filter | " + fontHint + "F10: Quit";
+            } else {
+                const auto* eng = item.get_selected_engine();
+                std::string engTitle = eng ? eng->title : "Unknown";
+                line1 = "ENGINE: " + engTitle;
+                if (item.compatible_engines.size() > 1) {
+                    line1 += " [" + std::to_string(item.compatible_engines.size()) + " compatible | F4: Change]";
+                } else if (item.compatible_engines.size() == 1) {
+                    line1 += " [1 compatible]";
+                }
+                line1Color = yellow;
 
-            line3 = "F1: Help | F2: Save | F3: Info | F4: Engine | F5: Add WAD | " + fontHint + "F10: Quit";
+                const std::string& cmd = !item.cmd.empty() ? item.cmd : item.get_command();
+                line2 = "CMD: " + cmd;
+                line2Color = white;
+
+                line3 = "F1: Help | F2: Save | F3: Info | F4: Engine | F5: Add WAD | F7: Filter | " + fontHint + "F10: Quit";
+            }
         }
 
         if (!statusMessage.empty()) {
@@ -895,9 +1058,11 @@ void Menu::render() {
                           statusMessage.find("Created") != std::string::npos) ? green : yellow;
         }
 
-        renderText(activeSmallFont, line1, osdX, osdStartY, line1Color, false);
-        renderText(activeSmallFont, line2, osdX, osdStartY + lineSpacing, line2Color, false);
-        renderText(activeSmallFont, line3, osdX, osdStartY + 2 * lineSpacing, line3Color, false);
+        if (!line1.empty()) {
+            renderText(activeSmallFont, line1, osdX, osdStartY, line1Color, false);
+            renderText(activeSmallFont, line2, osdX, osdStartY + lineSpacing, line2Color, false);
+            renderText(activeSmallFont, line3, osdX, osdStartY + 2 * lineSpacing, line3Color, false);
+        }
     }
 
     if (overlayState != OverlayState::None && activeSmallFont) {
@@ -1073,7 +1238,7 @@ void Menu::renderHelpOverlay(TTF_Font* osdFont) {
     if (!renderer || !osdFont) return;
 
     int w = 680;
-    int h = 470;
+    int h = 490;
     int x = (screenWidth - w) / 2;
     int y = (screenHeight - h) / 2;
 
@@ -1094,6 +1259,7 @@ void Menu::renderHelpOverlay(TTF_Font* osdFont) {
         { "F3",                  "Selected module information" },
         { "F4",                  "Engine selection menu" },
         { "F5",                  "Add WAD file / Create module" },
+        { "F7 / /",              "Filter games by substring" },
         { "F9",                  "Toggle OSD font (Mono / Doom HUD)" },
         { "F10 / Esc",           "Fast quit launcher / Back" }
     };
@@ -1104,7 +1270,7 @@ void Menu::renderHelpOverlay(TTF_Font* osdFont) {
     SDL_Color colFoot = { 150, 150, 150, 255 };
 
     int startY = y + 48;
-    int rowSpacing = 31;
+    int rowSpacing = 30;
 
     for (size_t i = 0; i < kNumHelpRows; ++i) {
         int curY = startY + static_cast<int>(i) * rowSpacing;

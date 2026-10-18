@@ -97,6 +97,11 @@ public:
     }
     void saveSettings();
 
+    bool isFilterActive() const { return filterActive; }
+    const std::string& getFilterQuery() const { return filterQuery; }
+    void startFilter(bool fromSlashKey = false);
+    void clearFilter();
+
 private:
     SDL_Renderer* renderer;
     TTF_Font* font;
@@ -105,10 +110,14 @@ private:
     bool useAlternateFont;
     int screenWidth;
     int screenHeight;
+    std::vector<doomlauncher::ResolvedMenuItem> allMenuItems;
     std::vector<doomlauncher::ResolvedMenuItem> menuItems;
     int selectedItem;
     bool quitSelected;
     std::string statusMessage;
+    bool filterActive = false;
+    std::string filterQuery;
+    bool ignoreNextSlashTextInput = false;
     OverlayState overlayState = OverlayState::None;
     int modalCursorIndex = 0;
     doomlauncher::ModuleRegistry* moduleRegistry = nullptr;
@@ -171,6 +180,8 @@ private:
     void pruneTextCache();
     void clearTextCache();
 
+    void applyFilter();
+    void syncMenuItemsToAll();
     void confirmSelectedWads();
     void refreshMenuFromRegistry(const std::string& selectModuleName = "");
 

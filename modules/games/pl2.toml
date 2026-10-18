@@ -1,0 +1,10 @@
+[pl2]
+type = "game"
+title = "Plutonia 2"
+base_game = "plutonia"
+pwads = ["PL2.WAD"]
+pwad_sha1 = [
+    "4ef41ba4b3c0d39d79fc592b2b258765bca36657"
+]
+compat_level = 4
+requires_capability = ["vanilla"]

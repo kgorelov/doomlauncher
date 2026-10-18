@@ -1,0 +1,11 @@
+[btsx_e1]
+type = "game"
+title = "Back to Saturn X E1"
+base_game = "doom2"
+pwads = ["btsx_e1a.wad", "btsx_e1b.wad"]
+pwad_sha1 = [
+    "9c19bdf92d7a44249c88e0baf8cc6ec8b9b9e5d3",
+    "6535aa24ad7b68b7e598dceabf25043b88f6dc12"
+]
+compat_level = 2
+requires_capability = ["vanilla"]

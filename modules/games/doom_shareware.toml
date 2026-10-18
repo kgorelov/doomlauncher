@@ -1,0 +1,9 @@
+[doom_shareware]
+type = "game"
+title = "Doom (Shareware)"
+iwad = "DOOM1.WAD"
+iwad_sha1 = [
+    "c6612ac5a8ac2e2a1d707f9b2869af820efb7c50"
+]
+compat_level = 3
+requires_capability = ["vanilla"]

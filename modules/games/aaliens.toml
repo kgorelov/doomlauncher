@@ -1,0 +1,10 @@
+[aaliens]
+type = "game"
+title = "Ancient Aliens"
+base_game = "doom2"
+pwads = ["aaliens.wad"]
+pwad_sha1 = [
+    "e60dea774966086b97482c4ec621a066ebdd9ec8"
+]
+compat_level = 9
+requires_capability = ["boom"]

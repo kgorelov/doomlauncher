@@ -1,0 +1,11 @@
+[requiem]
+type = "game"
+title = "Requiem"
+base_game = "doom2"
+pwads = ["REQUIEM.WAD", "REQMUS.WAD"]
+pwad_sha1 = [
+    "fd314d239e9a8528cca069c83ff3cc2bef6fabc5",
+    "b2678ead7b8a9f800d63bb2af5a31a9642c425d5"
+]
+compat_level = 2
+requires_capability = ["vanilla"]

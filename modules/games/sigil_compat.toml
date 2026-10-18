@@ -1,0 +1,10 @@
+[sigil_compat]
+type = "game"
+title = "Sigil (Compat)"
+base_game = "doom"
+pwads = ["SIGIL_COMPAT_v1_21.wad"]
+pwad_sha1 = [
+    "b5e68950820b3a0385375dbace81376e73568207"
+]
+compat_level = 3
+requires_capability = ["vanilla"]

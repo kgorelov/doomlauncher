@@ -1,0 +1,10 @@
+[sunlust]
+type = "game"
+title = "Sunlust"
+base_game = "doom2"
+pwads = ["sunlust.wad"]
+pwad_sha1 = [
+    "e031f264939dd2452a888b8a1acd7eb56bf7e01c"
+]
+compat_level = 9
+requires_capability = ["boom"]

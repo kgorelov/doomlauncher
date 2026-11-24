@@ -49,6 +49,7 @@ public:
     void update();
     void render();
     bool isQuitSelected() const;
+    const std::string& getPendingExecCommand() const { return pendingExecCommand; }
 
     int getSelectedItem() const { return selectedItem; }
     int getCurrentPage() const { return selectedItem / ITEMS_PER_PAGE; }
@@ -115,6 +116,7 @@ private:
     std::vector<doomlauncher::ResolvedMenuItem> menuItems;
     int selectedItem;
     bool quitSelected;
+    std::string pendingExecCommand;
     std::string statusMessage;
     bool filterActive = false;
     std::string filterQuery;

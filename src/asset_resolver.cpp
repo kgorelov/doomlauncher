@@ -240,6 +240,16 @@ UserConfig AssetResolver::load_config(const std::string& explicit_path) {
                 config.recent_first = b->get();
             }
         }
+        if (auto node = prefs_tbl->get("no_quit_confirmation")) {
+            if (auto b = node->as_boolean()) {
+                config.no_quit_confirmation = b->get();
+            }
+        }
+        if (auto node = prefs_tbl->get("quit_after_game")) {
+            if (auto b = node->as_boolean()) {
+                config.quit_after_game = b->get();
+            }
+        }
     }
 
     if (auto iwads_tbl = tbl.get_as<toml::table>("iwads")) {
@@ -296,6 +306,8 @@ bool AssetResolver::save_config(const UserConfig& config, const std::string& exp
             prefs_tbl.insert_or_assign("osd_font", config.osd_font);
         }
         prefs_tbl.insert_or_assign("recent_first", config.recent_first);
+        prefs_tbl.insert_or_assign("no_quit_confirmation", config.no_quit_confirmation);
+        prefs_tbl.insert_or_assign("quit_after_game", config.quit_after_game);
         if (!prefs_tbl.empty()) {
             root.insert_or_assign("preferences", prefs_tbl);
         }

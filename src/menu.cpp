@@ -835,12 +835,19 @@ void Menu::handleEvent(const SDL_Event& event) {
                 }
                 break;
             case SDLK_F10:
-                overlayState = OverlayState::QuitConfirm;
+                if (moduleRegistry && moduleRegistry->get_user_config().no_quit_confirmation) {
+                    quitSelected = true;
+                } else {
+                    overlayState = OverlayState::QuitConfirm;
+                }
                 statusMessage.clear();
                 break;
             case SDLK_ESCAPE:
                 if (filterActive || !filterQuery.empty()) {
                     clearFilter();
+                    statusMessage.clear();
+                } else if (moduleRegistry && moduleRegistry->get_user_config().no_quit_confirmation) {
+                    quitSelected = true;
                     statusMessage.clear();
                 } else {
                     overlayState = OverlayState::QuitConfirm;
@@ -908,9 +915,22 @@ void Menu::launchSelected() {
     }
 
     std::string launchedModule = item.module_name;
+    bool quitAfterGame = moduleRegistry && moduleRegistry->get_user_config().quit_after_game;
 
     statusMessage = "Launching: " + cmd;
     std::cout << statusMessage << std::endl;
+
+    if (quitAfterGame) {
+        if (moduleRegistry && !launchedModule.empty() && launchedModule != "quit") {
+            moduleRegistry->record_recent_module(launchedModule);
+            syncMenuItemsToAll();
+            std::string savedPath;
+            moduleRegistry->save_state(allMenuItems, savedPath, stateSavePath);
+        }
+        pendingExecCommand = cmd;
+        quitSelected = true;
+        return;
+    }
 
     int res = std::system(cmd.c_str());
     (void)res;

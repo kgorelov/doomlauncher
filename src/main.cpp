@@ -1,8 +1,10 @@
 #include <SDL.h>
 #include <SDL_ttf.h>
+#include <cstdio>
 #include <filesystem>
 #include <iostream>
 #include <string>
+#include <unistd.h>
 #include <vector>
 #include "config_module.h"
 #include "fire.h"
@@ -217,6 +219,13 @@ int main(int argc, char* argv[]) {
     SDL_DestroyWindow(window);
     TTF_Quit();
     SDL_Quit();
+
+    if (!menu.getPendingExecCommand().empty()) {
+        std::string execCmd = menu.getPendingExecCommand();
+        execl("/bin/sh", "sh", "-c", execCmd.c_str(), static_cast<char*>(nullptr));
+        std::perror("execl");
+        return 1;
+    }
 
     return 0;
 }

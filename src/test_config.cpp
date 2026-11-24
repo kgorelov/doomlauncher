@@ -2693,6 +2693,141 @@ void test_dynamic_menu_ordering() {
     std::cout << "Dynamic Menu Ordering (recent_first) Tests passed!" << std::endl << std::endl;
 }
 
+void test_quit_options() {
+    std::cout << "--- Running Quit Options (no_quit_confirmation & quit_after_game) Tests ---" << std::endl;
+    namespace fs = std::filesystem;
+
+    fs::path test_root = "temp_quit_options_test";
+    fs::remove_all(test_root);
+    fs::create_directories(test_root / "wads");
+    fs::create_directories(test_root / "mods" / "engines");
+    fs::create_directories(test_root / "mods" / "games");
+
+    fs::path cfg_file = test_root / "config.toml";
+    fs::path state_file = test_root / "state.toml";
+
+    // 1. Verify defaults are false and loading/saving true works
+    {
+        UserConfig def_cfg;
+        assert(def_cfg.no_quit_confirmation == false);
+        assert(def_cfg.quit_after_game == false);
+
+        std::ofstream f(cfg_file);
+        f << "[preferences]\n"
+          << "no_quit_confirmation = true\n"
+          << "quit_after_game = true\n";
+        f.close();
+
+        UserConfig loaded = AssetResolver::load_config(cfg_file.string());
+        assert(loaded.no_quit_confirmation == true);
+        assert(loaded.quit_after_game == true);
+
+        assert(AssetResolver::save_config(loaded, cfg_file.string()));
+        UserConfig reloaded = AssetResolver::load_config(cfg_file.string());
+        assert(reloaded.no_quit_confirmation == true);
+        assert(reloaded.quit_after_game == true);
+    }
+
+    // Create dummy WAD, engine, and game modules
+    {
+        std::ofstream(test_root / "wads" / "DOOM2.WAD") << "DOOM2_DUMMY";
+    }
+    {
+        std::ofstream f(test_root / "mods" / "engines" / "dsda.toml");
+        f << "[dsda]\n"
+          << "type = \"engine\"\n"
+          << "title = \"DSDA-Doom\"\n"
+          << "binary = \"/bin/true\"\n"
+          << "capabilities = [\"vanilla\"]\n"
+          << "cmd = \"{{BINARY}} -iwad {{IWAD}}\"\n";
+    }
+    {
+        std::ofstream f(test_root / "mods" / "games" / "doom2.toml");
+        f << "[doom2]\n"
+          << "type = \"game\"\n"
+          << "title = \"Doom II\"\n"
+          << "iwad = \"DOOM2.WAD\"\n";
+    }
+
+    UserConfig cfg;
+    cfg.module_dirs = { (test_root / "mods").string() };
+    cfg.wad_dirs = { (test_root / "wads").string() };
+    cfg.no_quit_confirmation = true;
+    cfg.quit_after_game = true;
+    assert(AssetResolver::save_config(cfg, cfg_file.string()));
+
+    // 2. Test no_quit_confirmation = true: Esc quits immediately (or clears filter first)
+    {
+        ModuleRegistry reg;
+        reg.load_state(state_file.string());
+        assert(reg.load_user_config(cfg_file.string()));
+        reg.get_wad_catalog().scan_directory((test_root / "wads").string());
+        assert(reg.load_configured_modules());
+
+        Menu menu(nullptr, nullptr, nullptr, 1024, 768);
+        menu.setModuleRegistry(&reg);
+        menu.setConfigSavePath(cfg_file.string());
+        menu.setStateSavePath(state_file.string());
+        menu.setMenuItems(reg.resolve_menu_items());
+
+        auto sendKey = [&](SDL_Keycode sym) {
+            SDL_Event ev;
+            std::memset(&ev, 0, sizeof(ev));
+            ev.type = SDL_KEYDOWN;
+            ev.key.keysym.sym = sym;
+            menu.handleEvent(ev);
+        };
+
+        // Start filter, press Esc -> clears filter without quitting
+        sendKey(SDLK_SLASH);
+        assert(menu.isFilterActive());
+        sendKey(SDLK_ESCAPE);
+        assert(!menu.isFilterActive());
+        assert(!menu.isQuitSelected());
+        assert(menu.getOverlayState() == OverlayState::None);
+
+        // Press Esc on main menu -> quits immediately without QuitConfirm
+        sendKey(SDLK_ESCAPE);
+        assert(menu.getOverlayState() == OverlayState::None);
+        assert(menu.isQuitSelected());
+        assert(menu.getPendingExecCommand().empty());
+    }
+
+    // 3. Test quit_after_game = true: launching a game sets pendingExecCommand, quitSelected, and saves recent state
+    {
+        ModuleRegistry reg;
+        reg.load_state(state_file.string());
+        assert(reg.load_user_config(cfg_file.string()));
+        reg.get_wad_catalog().scan_directory((test_root / "wads").string());
+        assert(reg.load_configured_modules());
+
+        Menu menu(nullptr, nullptr, nullptr, 1024, 768);
+        menu.setModuleRegistry(&reg);
+        menu.setConfigSavePath(cfg_file.string());
+        menu.setStateSavePath(state_file.string());
+        menu.setMenuItems(reg.resolve_menu_items());
+
+        SDL_Event ev;
+        std::memset(&ev, 0, sizeof(ev));
+        ev.type = SDL_KEYDOWN;
+        ev.key.keysym.sym = SDLK_RETURN;
+        menu.handleEvent(ev);
+
+        assert(menu.isQuitSelected());
+        assert(!menu.getPendingExecCommand().empty());
+        assert(menu.getPendingExecCommand().find("DOOM2.WAD") != std::string::npos);
+
+        // Verify state.toml was saved with doom2 as recent before exec
+        ModuleRegistry reg_verify;
+        assert(reg_verify.load_state(state_file.string()));
+        assert(!reg_verify.get_recent_modules().empty());
+        assert(reg_verify.get_recent_modules()[0] == "doom2");
+    }
+
+    fs::remove_all(test_root);
+    std::cout << "Quit Options (no_quit_confirmation & quit_after_game) Tests passed!" << std::endl << std::endl;
+}
+
 int main() {
     test_template_engine();
     test_module_registry();
@@ -2718,6 +2853,7 @@ int main() {
     test_phase5_end_to_end_verification();
     test_menu_substring_filter();
     test_dynamic_menu_ordering();
+    test_quit_options();
     std::cout << "ALL TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;
 }

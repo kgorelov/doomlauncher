@@ -14,6 +14,8 @@ struct UserConfig {
     std::string default_engine;
     std::string osd_font = "mono";
     bool recent_first = true;
+    bool no_quit_confirmation = false;
+    bool quit_after_game = false;
 };
 
 class AssetResolver {

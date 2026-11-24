@@ -72,6 +72,7 @@ public:
     doomlauncher::ModuleRegistry* getModuleRegistry() const { return moduleRegistry; }
 
     void setConfigSavePath(const std::string& path) { configSavePath = path; }
+    void setStateSavePath(const std::string& path) { stateSavePath = path; }
     void setUserModulesDir(const std::string& path) { userModulesDir = path; }
 
     void openAddWadDialog(const std::string& startDir = "");
@@ -122,6 +123,7 @@ private:
     int modalCursorIndex = 0;
     doomlauncher::ModuleRegistry* moduleRegistry = nullptr;
     std::string configSavePath;
+    std::string stateSavePath;
     std::string userModulesDir;
     std::function<bool(const std::vector<doomlauncher::ResolvedMenuItem>&, std::string&)> saveCallback;
 

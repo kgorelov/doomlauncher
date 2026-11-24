@@ -334,6 +334,9 @@ std::string ModuleRegistry::sanitize_module_slug(const std::string& input) {
 bool ModuleRegistry::load_state(const std::string& filepath) {
     std::string path_str = filepath.empty() ? get_default_state_path() : filepath;
     std::string resolved_path = AssetResolver::expand_path(path_str);
+    if (!filepath.empty()) {
+        loaded_state_path = resolved_path;
+    }
 
     std::error_code ec;
     if (!fs::exists(resolved_path, ec)) {
@@ -349,6 +352,18 @@ bool ModuleRegistry::load_state(const std::string& filepath) {
                 }
             }
         }
+        if (auto recent_arr = tbl.get_as<toml::array>("recent_modules")) {
+            recent_modules.clear();
+            for (const auto& elem : *recent_arr) {
+                if (auto str = elem.as_string()) {
+                    std::string mod = std::string(str->get());
+                    if (!mod.empty() && mod != "quit" &&
+                        std::find(recent_modules.begin(), recent_modules.end(), mod) == recent_modules.end()) {
+                        recent_modules.push_back(mod);
+                    }
+                }
+            }
+        }
         wad_catalog.load_cache(resolved_path);
         return true;
     } catch (const toml::parse_error& err) {
@@ -358,7 +373,7 @@ bool ModuleRegistry::load_state(const std::string& filepath) {
 }
 
 bool ModuleRegistry::save_state(const std::string& filepath) const {
-    std::string path_str = filepath.empty() ? get_default_state_path() : filepath;
+    std::string path_str = filepath.empty() ? get_effective_state_path() : filepath;
     std::string resolved_path = AssetResolver::expand_path(path_str);
 
     try {
@@ -384,6 +399,12 @@ bool ModuleRegistry::save_state(const std::string& filepath) const {
         }
         tbl.insert_or_assign("engines", engines_tbl);
 
+        toml::array recent_arr;
+        for (const auto& mod_name : recent_modules) {
+            recent_arr.push_back(mod_name);
+        }
+        tbl.insert_or_assign("recent_modules", recent_arr);
+
         std::ofstream out(resolved_path);
         if (!out.is_open()) {
             return false;
@@ -400,7 +421,7 @@ bool ModuleRegistry::save_state(const std::string& filepath) const {
 }
 
 bool ModuleRegistry::save_state(const std::vector<ResolvedMenuItem>& items, std::string& out_saved_path, const std::string& filepath) {
-    std::string path_str = filepath.empty() ? get_default_state_path() : filepath;
+    std::string path_str = filepath.empty() ? get_effective_state_path() : filepath;
     out_saved_path = AssetResolver::expand_path(path_str);
 
     for (const auto& item : items) {
@@ -435,6 +456,30 @@ void ModuleRegistry::apply_saved_state(std::vector<ResolvedMenuItem>& items) con
             item.select_engine(it->second);
         }
     }
+}
+
+void ModuleRegistry::record_recent_module(const std::string& module_name) {
+    if (module_name.empty() || module_name == "quit") {
+        return;
+    }
+    auto it = std::find(recent_modules.begin(), recent_modules.end(), module_name);
+    if (it != recent_modules.end()) {
+        recent_modules.erase(it);
+    }
+    recent_modules.insert(recent_modules.begin(), module_name);
+}
+
+const std::vector<std::string>& ModuleRegistry::get_recent_modules() const {
+    return recent_modules;
+}
+
+std::string ModuleRegistry::get_effective_state_path() const {
+    if (const char* env = std::getenv("DOOMLAUNCHER_STATE")) {
+        if (env[0] != '\0') {
+            return get_default_state_path();
+        }
+    }
+    return !loaded_state_path.empty() ? loaded_state_path : get_default_state_path();
 }
 
 bool ModuleRegistry::save_state_from_items(const std::vector<ResolvedMenuItem>& items, std::string& out_saved_path, const std::string& filepath) {
@@ -600,7 +645,11 @@ bool ModuleRegistry::create_user_module(const UserModuleSpec& spec, std::string&
         out << root << "\n";
         out.close();
 
-        return load_file(out_filepath);
+        if (load_file(out_filepath)) {
+            record_recent_module(slug);
+            return true;
+        }
+        return false;
     } catch (const std::exception& e) {
         std::cerr << "Error creating user module '" << out_filepath << "': " << e.what() << std::endl;
         return false;
@@ -965,6 +1014,37 @@ std::vector<ResolvedMenuItem> ModuleRegistry::resolve_menu_items(bool only_activ
         }
 
         items.push_back(item);
+    }
+
+    auto title_less = [](const ResolvedMenuItem& a, const ResolvedMenuItem& b) {
+        std::string ta = to_lower(a.title);
+        std::string tb = to_lower(b.title);
+        if (ta != tb) return ta < tb;
+        return a.module_name < b.module_name;
+    };
+
+    if (user_config.recent_first && !recent_modules.empty()) {
+        std::unordered_map<std::string, size_t> recent_rank;
+        recent_rank.reserve(recent_modules.size());
+        for (size_t i = 0; i < recent_modules.size(); ++i) {
+            recent_rank.emplace(recent_modules[i], i);
+        }
+
+        std::sort(items.begin(), items.end(), [&](const ResolvedMenuItem& a, const ResolvedMenuItem& b) {
+            auto it_a = recent_rank.find(a.module_name);
+            auto it_b = recent_rank.find(b.module_name);
+            bool a_recent = (it_a != recent_rank.end());
+            bool b_recent = (it_b != recent_rank.end());
+            if (a_recent != b_recent) {
+                return a_recent;
+            }
+            if (a_recent && b_recent) {
+                return it_a->second < it_b->second;
+            }
+            return title_less(a, b);
+        });
+    } else {
+        std::sort(items.begin(), items.end(), title_less);
     }
 
     return items;

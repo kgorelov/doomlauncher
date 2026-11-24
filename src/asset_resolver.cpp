@@ -235,6 +235,11 @@ UserConfig AssetResolver::load_config(const std::string& explicit_path) {
                 config.osd_font = std::string(str->get());
             }
         }
+        if (auto node = prefs_tbl->get("recent_first")) {
+            if (auto b = node->as_boolean()) {
+                config.recent_first = b->get();
+            }
+        }
     }
 
     if (auto iwads_tbl = tbl.get_as<toml::table>("iwads")) {
@@ -290,6 +295,7 @@ bool AssetResolver::save_config(const UserConfig& config, const std::string& exp
         if (!config.osd_font.empty()) {
             prefs_tbl.insert_or_assign("osd_font", config.osd_font);
         }
+        prefs_tbl.insert_or_assign("recent_first", config.recent_first);
         if (!prefs_tbl.empty()) {
             root.insert_or_assign("preferences", prefs_tbl);
         }

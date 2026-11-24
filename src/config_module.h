@@ -93,6 +93,10 @@ public:
     const std::unordered_map<std::string, std::string>& get_saved_engines() const;
     void apply_saved_state(std::vector<ResolvedMenuItem>& items) const;
 
+    void record_recent_module(const std::string& module_name);
+    const std::vector<std::string>& get_recent_modules() const;
+    std::string get_effective_state_path() const;
+
     static std::string get_default_state_path();
     static std::string get_default_saves_root();
     static std::string get_module_save_dir(const std::string& module_name);
@@ -134,6 +138,8 @@ public:
 private:
     std::unordered_map<std::string, Module> modules;
     std::unordered_map<std::string, std::string> saved_engines;
+    std::vector<std::string> recent_modules;
+    std::string loaded_state_path;
     AssetResolver asset_resolver;
     WadCatalog wad_catalog;
     EngineRegistry engine_registry;

@@ -2525,6 +2525,174 @@ void test_menu_substring_filter() {
     std::cout << "Menu Substring Filter ('/' and F7) Tests passed!" << std::endl << std::endl;
 }
 
+void test_dynamic_menu_ordering() {
+    std::cout << "--- Running Dynamic Menu Ordering (recent_first) Tests ---" << std::endl;
+    namespace fs = std::filesystem;
+
+    fs::path test_root = "temp_dynamic_ordering_test";
+    fs::remove_all(test_root);
+    fs::create_directories(test_root / "wads");
+    fs::create_directories(test_root / "mods" / "engines");
+    fs::create_directories(test_root / "mods" / "games");
+    fs::create_directories(test_root / "usr_mods" / "games");
+
+    fs::path cfg_file = test_root / "config.toml";
+    fs::path state_file = test_root / "state.toml";
+
+    // 1. Verify UserConfig default recent_first == true, and loading/saving recent_first = false
+    {
+        UserConfig def_cfg;
+        assert(def_cfg.recent_first == true);
+
+        std::ofstream f(cfg_file);
+        f << "[preferences]\n"
+          << "recent_first = false\n";
+        f.close();
+
+        UserConfig loaded_false = AssetResolver::load_config(cfg_file.string());
+        assert(loaded_false.recent_first == false);
+
+        assert(AssetResolver::save_config(loaded_false, cfg_file.string()));
+        UserConfig reloaded_false = AssetResolver::load_config(cfg_file.string());
+        assert(reloaded_false.recent_first == false);
+
+        reloaded_false.recent_first = true;
+        assert(AssetResolver::save_config(reloaded_false, cfg_file.string()));
+        UserConfig reloaded_true = AssetResolver::load_config(cfg_file.string());
+        assert(reloaded_true.recent_first == true);
+    }
+
+    // Create dummy WADs and engine + game modules
+    {
+        std::ofstream(test_root / "wads" / "DOOM2.WAD") << "DOOM2_DUMMY";
+        std::ofstream(test_root / "wads" / "ALPHA.WAD") << "ALPHA_DUMMY";
+        std::ofstream(test_root / "wads" / "ZETA.WAD") << "ZETA_DUMMY";
+    }
+    {
+        std::ofstream f(test_root / "mods" / "engines" / "sh.toml");
+        f << "[sh]\n"
+          << "type = \"engine\"\n"
+          << "title = \"Shell\"\n"
+          << "binary = \"/bin/true\"\n"
+          << "capabilities = [\"vanilla\"]\n"
+          << "cmd = \"{{BINARY}} -iwad {{IWAD}}\"\n";
+    }
+    {
+        std::ofstream f(test_root / "mods" / "games" / "doom2.toml");
+        f << "[doom2]\n"
+          << "type = \"game\"\n"
+          << "title = \"Doom II\"\n"
+          << "iwad = \"DOOM2.WAD\"\n";
+    }
+    {
+        std::ofstream f(test_root / "mods" / "games" / "alpha.toml");
+        f << "[alpha]\n"
+          << "type = \"game\"\n"
+          << "title = \"Alpha WAD\"\n"
+          << "base_game = \"doom2\"\n"
+          << "pwads = [\"ALPHA.WAD\"]\n";
+    }
+
+    UserConfig cfg;
+    cfg.module_dirs = { (test_root / "mods").string(), (test_root / "usr_mods").string() };
+    cfg.wad_dirs = { (test_root / "wads").string() };
+    cfg.recent_first = true;
+    assert(AssetResolver::save_config(cfg, cfg_file.string()));
+
+    // 2. Session 1: Alphabetical default, then create_user_module puts new game at top, then playing moves played game to top
+    {
+        ModuleRegistry reg;
+        reg.load_state(state_file.string());
+        assert(reg.load_user_config(cfg_file.string()));
+        reg.get_wad_catalog().scan_directory((test_root / "wads").string());
+        assert(reg.load_configured_modules());
+
+        auto initial_items = reg.resolve_menu_items();
+        assert(initial_items.size() == 2);
+        // Alphabetical order when no recents: Alpha WAD, Doom II
+        assert(initial_items[0].module_name == "alpha");
+        assert(initial_items[1].module_name == "doom2");
+
+        Menu menu(nullptr, nullptr, nullptr, 1024, 768);
+        menu.setModuleRegistry(&reg);
+        menu.setConfigSavePath(cfg_file.string());
+        menu.setStateSavePath(state_file.string());
+        menu.setUserModulesDir((test_root / "usr_mods").string());
+        menu.setMenuItems(initial_items);
+
+        // Create a new user module "zeta" -> should move to index 0!
+        UserModuleSpec spec;
+        spec.name = "zeta";
+        spec.title = "Zeta WAD";
+        spec.base_game = "doom2";
+        spec.pwads = { "ZETA.WAD" };
+        std::string createdPath;
+        assert(reg.create_user_module(spec, createdPath, (test_root / "usr_mods").string()));
+        assert(reg.save_state(state_file.string()));
+
+        menu.setMenuItems(reg.resolve_menu_items());
+        assert(menu.getMenuItems().size() == 4); // zeta, alpha, doom2, quit
+        assert(menu.getMenuItems()[0].module_name == "zeta");
+        assert(menu.getMenuItems()[1].module_name == "alpha");
+        assert(menu.getMenuItems()[2].module_name == "doom2");
+        assert(menu.getMenuItems()[3].module_name == "quit");
+
+        // Now select "doom2" (index 2) and launch it (press Return) -> should move "doom2" to index 0!
+        auto sendKey = [&](SDL_Keycode sym) {
+            SDL_Event ev;
+            std::memset(&ev, 0, sizeof(ev));
+            ev.type = SDL_KEYDOWN;
+            ev.key.keysym.sym = sym;
+            menu.handleEvent(ev);
+        };
+        sendKey(SDLK_DOWN); // alpha
+        sendKey(SDLK_DOWN); // doom2
+        assert(menu.getSelectedItem() == 2);
+        sendKey(SDLK_RETURN);
+
+        // After launch, doom2 is at index 0, zeta is at index 1, alpha is at index 2, quit at index 3
+        assert(menu.getMenuItems()[0].module_name == "doom2");
+        assert(menu.getMenuItems()[1].module_name == "zeta");
+        assert(menu.getMenuItems()[2].module_name == "alpha");
+        assert(menu.getSelectedItem() == 0);
+    }
+
+    // 3. Session 2: Fresh restart with recent_first = true preserves recent order from state.toml
+    {
+        ModuleRegistry reg2;
+        assert(reg2.load_state(state_file.string()));
+        assert(reg2.load_user_config(cfg_file.string()));
+        assert(reg2.load_configured_modules());
+
+        auto items = reg2.resolve_menu_items();
+        assert(items.size() == 3);
+        assert(items[0].module_name == "doom2");
+        assert(items[1].module_name == "zeta");
+        assert(items[2].module_name == "alpha");
+    }
+
+    // 4. Session 3: Setting recent_first = false in config.toml disables dynamic ordering (reverts to alphabetical)
+    {
+        cfg.recent_first = false;
+        assert(AssetResolver::save_config(cfg, cfg_file.string()));
+
+        ModuleRegistry reg3;
+        assert(reg3.load_state(state_file.string()));
+        assert(reg3.load_user_config(cfg_file.string()));
+        assert(reg3.get_user_config().recent_first == false);
+        assert(reg3.load_configured_modules());
+
+        auto items = reg3.resolve_menu_items();
+        assert(items.size() == 3);
+        assert(items[0].module_name == "alpha");
+        assert(items[1].module_name == "doom2");
+        assert(items[2].module_name == "zeta");
+    }
+
+    fs::remove_all(test_root);
+    std::cout << "Dynamic Menu Ordering (recent_first) Tests passed!" << std::endl << std::endl;
+}
+
 int main() {
     test_template_engine();
     test_module_registry();
@@ -2549,6 +2717,7 @@ int main() {
     test_phase4_add_wad_and_create_module_dialogs();
     test_phase5_end_to_end_verification();
     test_menu_substring_filter();
+    test_dynamic_menu_ordering();
     std::cout << "ALL TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;
 }

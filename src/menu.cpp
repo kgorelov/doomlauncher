@@ -330,6 +330,12 @@ void Menu::confirmSelectedWads() {
     }
 
     if (!matchedModules.empty()) {
+        for (auto it = matchedModules.rbegin(); it != matchedModules.rend(); ++it) {
+            moduleRegistry->record_recent_module(*it);
+        }
+        syncMenuItemsToAll();
+        std::string savedPath;
+        moduleRegistry->save_state(allMenuItems, savedPath, stateSavePath);
         refreshMenuFromRegistry(matchedModules[0]);
         std::string modTitle = matchedModules[0];
         if (const auto* mod = moduleRegistry->get_module(matchedModules[0])) {
@@ -478,6 +484,10 @@ bool Menu::submitCreateModuleForm() {
 
     if (ok) {
         std::string slug = fs::path(createdPath).stem().string();
+        moduleRegistry->record_recent_module(slug);
+        syncMenuItemsToAll();
+        std::string savedPath;
+        moduleRegistry->save_state(allMenuItems, savedPath, stateSavePath);
         refreshMenuFromRegistry(slug);
         statusMessage = "Created & activated module: " + spec.title;
         overlayState = OverlayState::None;
@@ -848,7 +858,7 @@ void Menu::saveSettings() {
     if (saveCallback) {
         success = saveCallback(allMenuItems, savedPath);
     } else if (moduleRegistry) {
-        success = moduleRegistry->save_state(allMenuItems, savedPath);
+        success = moduleRegistry->save_state(allMenuItems, savedPath, stateSavePath);
     } else {
         success = doomlauncher::ModuleRegistry::save_state_from_items(allMenuItems, savedPath);
     }
@@ -897,11 +907,37 @@ void Menu::launchSelected() {
         std::filesystem::create_directories(item.save_dir, ec);
     }
 
+    std::string launchedModule = item.module_name;
+
     statusMessage = "Launching: " + cmd;
     std::cout << statusMessage << std::endl;
 
     int res = std::system(cmd.c_str());
     (void)res;
+
+    if (moduleRegistry && !launchedModule.empty() && launchedModule != "quit") {
+        moduleRegistry->record_recent_module(launchedModule);
+        syncMenuItemsToAll();
+        std::string savedPath;
+        moduleRegistry->save_state(allMenuItems, savedPath, stateSavePath);
+
+        if (moduleRegistry->get_user_config().recent_first) {
+            std::string prevFilter = filterQuery;
+            bool wasFilterActive = filterActive;
+            refreshMenuFromRegistry(launchedModule);
+            if (wasFilterActive || !prevFilter.empty()) {
+                filterActive = wasFilterActive;
+                filterQuery = prevFilter;
+                applyFilter();
+                for (size_t i = 0; i < menuItems.size(); ++i) {
+                    if (menuItems[i].module_name == launchedModule) {
+                        selectedItem = static_cast<int>(i);
+                        break;
+                    }
+                }
+            }
+        }
+    }
 }
 
 void Menu::update() {

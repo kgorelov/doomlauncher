@@ -13,6 +13,7 @@ struct UserConfig {
     std::unordered_map<std::string, std::string> iwads;
     std::string default_engine;
     std::string osd_font = "mono";
+    bool recent_first = true;
 };
 
 class AssetResolver {
